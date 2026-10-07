@@ -264,11 +264,9 @@ def _tailor_projects(resume_text: str, job_title: str, job_description: str) -> 
         return sum(term in target for term in PROJECT_RELEVANCE_TERMS[key])
 
     ranked = sorted(enumerate(projects), key=lambda pair: (-score(pair[1]), pair[0]))
-    relevant = [project for _, project in ranked if score(project) > 0]
-    if not relevant:
-        return resume_text
-
-    selected = relevant[:2]
+    # Keep a second project when available so a sparse job description does not
+    # produce a resume with an unnecessarily thin project section.
+    selected = [project for _, project in ranked[:2]]
     return "\n".join(lines[:project_header + 1] + [line for project in selected for line in project] + lines[section_end:])
 
 

@@ -270,7 +270,18 @@ def test_tailor_resume_for_software_role_surfaces_jobhunter_project():
     )
     assert "JobHunter" in resume
     assert "Streamlit dashboard" in resume
-    assert "ResNet18" not in resume
+    assert "ResNet18" in resume
+
+
+def test_tailor_resume_keeps_two_projects_when_only_one_matches():
+    resume = tailor_resume_for_job(
+        "Systems Analyst",
+        "Example Corp",
+        job_description="SQL, APIs, and system architecture.",
+    )
+
+    assert "JobHunter" in resume
+    assert "Colorectal Cancer Detection Using Deep Learning" in resume
 
 
 def test_professional_summary_stays_general_across_job_families():
@@ -311,7 +322,7 @@ def test_tailor_resume_in_french_keeps_general_summary_and_adapts_projects():
     # only PROJECTS (and skill ordering) should adapt to the job.
     assert "Diplômé bilingue en génie logiciel de l'Université Lakeside" in resume
     assert "Campus Guide" in resume
-    assert "JobHunter" not in resume
+    assert "JobHunter" in resume
 
 
 def test_generate_cover_letter():
