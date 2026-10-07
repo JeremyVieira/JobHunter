@@ -19,6 +19,8 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate
 
 try:
@@ -565,13 +567,38 @@ def export_resume_docx(
     return DocxResumeExporter().export(parsed, file_path)
 
 
+def _register_pdf_fonts() -> None:
+    """Register a Unicode-capable font for PDF output on Windows."""
+    fonts = {
+        "ResumeArial": "C:\\Windows\\Fonts\\arial.ttf",
+        "ResumeArial-Bold": "C:\\Windows\\Fonts\\arialbd.ttf",
+        "ResumeArial-Italic": "C:\\Windows\\Fonts\\ariali.ttf",
+        "ResumeArial-BoldItalic": "C:\\Windows\\Fonts\\arialbi.ttf",
+    }
+    for name, path in fonts.items():
+        if name not in pdfmetrics.getRegisteredFontNames() and Path(path).exists():
+            pdfmetrics.registerFont(TTFont(name, path))
+
+
 def _pdf_styles() -> dict[str, ParagraphStyle]:
+    _register_pdf_fonts()
+    font_regular = "ResumeArial" if "ResumeArial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    font_bold = (
+        "ResumeArial-Bold"
+        if "ResumeArial-Bold" in pdfmetrics.getRegisteredFontNames()
+        else "Helvetica-Bold"
+    )
+    font_italic = (
+        "ResumeArial-Italic"
+        if "ResumeArial-Italic" in pdfmetrics.getRegisteredFontNames()
+        else "Helvetica-Oblique"
+    )
     base = getSampleStyleSheet()
     return {
         "name": ParagraphStyle(
             "resume-name",
             parent=base["Normal"],
-            fontName="Helvetica-Bold",
+            fontName=font_bold,
             fontSize=18,
             leading=21,
             textColor=PDF_ACCENT_COLOR,
@@ -581,7 +608,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "contact": ParagraphStyle(
             "resume-contact",
             parent=base["Normal"],
-            fontName="Helvetica",
+            fontName=font_regular,
             fontSize=8.5,
             leading=10,
             textColor=colors.HexColor("#404040"),
@@ -591,7 +618,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "section": ParagraphStyle(
             "resume-section",
             parent=base["Normal"],
-            fontName="Helvetica-Bold",
+            fontName=font_bold,
             fontSize=10.5,
             leading=12.5,
             textColor=PDF_ACCENT_COLOR,
@@ -601,7 +628,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "summary": ParagraphStyle(
             "resume-summary",
             parent=base["Normal"],
-            fontName="Helvetica",
+            fontName=font_regular,
             fontSize=9,
             leading=11.5,
             alignment=TA_JUSTIFY,
@@ -610,7 +637,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "entry": ParagraphStyle(
             "resume-entry",
             parent=base["Normal"],
-            fontName="Helvetica-Bold",
+            fontName=font_bold,
             fontSize=9.8,
             leading=11.5,
             spaceBefore=3,
@@ -619,7 +646,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "date": ParagraphStyle(
             "resume-date",
             parent=base["Normal"],
-            fontName="Helvetica-Oblique",
+            fontName=font_italic,
             fontSize=8.3,
             leading=9.5,
             textColor=colors.HexColor("#555555"),
@@ -628,7 +655,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "bullet": ParagraphStyle(
             "resume-bullet",
             parent=base["Normal"],
-            fontName="Helvetica",
+            fontName=font_regular,
             fontSize=9,
             leading=10.5,
             leftIndent=12,
@@ -638,7 +665,7 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
         "body": ParagraphStyle(
             "resume-body",
             parent=base["Normal"],
-            fontName="Helvetica",
+            fontName=font_regular,
             fontSize=9,
             leading=10.5,
             spaceAfter=1.5,
