@@ -1,0 +1,28 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::urllib3.exceptions.InsecureRequestWarning",
+    "ignore:.*RequestsDependencyWarning.*:UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line length (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jobhunter"]

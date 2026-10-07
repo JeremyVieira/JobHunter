@@ -1,0 +1,70 @@
+Nom du Candidat
+Montréal, QC
+(514) 000-0000
+candidat@exemple.com
+https://github.com/nomutilisateur
+
+PROFIL PROFESSIONNEL
+Finissant en génie logiciel à l'Université Concordia (septembre 2022 - juin 2026), combinant une solide formation technique avec une expérience pratique en soutien informatique et analyse de systèmes. Aptitudes éprouvées en diagnostic d'incidents, modélisation de données, optimisation des processus opérationnels et collaboration interfonctionnelle. Bilingue français-anglais avec un excellent sens de la résolution de problèmes.
+
+EXPÉRIENCE
+
+Entreprise A, Montréal - Soutien informatique
+Avril 2024 - Aujourd'hui
+- Membre d'une équipe clé responsable du soutien informatique et de la résolution d'incidents pour le Québec
+- Analyse de causes fondamentales d'incidents critiques et coordination étroite avec les équipes techniques pour minimiser les interruptions
+- Soutien d'urgence sur place, diagnostics matériels et logiciels
+- Collaboration interfonctionnelle avec des collègues répartis à travers le Canada
+- Rédaction de documentations techniques normalisées et guides de dépannage pour la base de connaissances interne
+
+Entreprise B, Montréal - Soutien informatique
+Janvier 2024 - Avril 2024
+- Diagnostic et résolution d'incidents matériels, logiciels et réseaux, améliorant la disponibilité opérationnelle
+- Recueil des besoins utilisateurs et traduction des problématiques d'affaires en solutions informatiques pour une grande entreprise
+- Maintien d'une documentation détaillée des configurations systèmes, des flux d'incidents et des procédures de résolution
+- Coordination avec les utilisateurs finaux pour assurer l'efficacité des solutions déployées
+
+FORMATION
+
+Université Concordia, Montréal - Baccalauréat en sciences, génie logiciel
+Septembre 2022 - Juin 2026
+- Membre de l'Institut de l'éducation coopérative
+- Programme comportant une importante composante d'expérience pratique
+
+Collège Vanier, Montréal - DEC en informatique et mathématiques
+Août 2020 - Avril 2022
+- Formation fondamentale complétée en informatique et mathématiques
+
+PROJETS
+
+Détection du cancer colorectal par apprentissage profond
+- Développement d'une solution d'apprentissage profond pour la détection automatisée du cancer colorectal avec l'architecture ResNet18 et 100 % de précision de classification
+- Mise en œuvre d'un pipeline complet de prétraitement et d'augmentation de données avec PyTorch et torchvision
+- Classification d'images histologiques en trois catégories de tissus : muqueuse, normal et stroma
+- Utilisation de l'accélération GPU et de la validation croisée pour optimiser les performances
+- Utilisation d'outils industriels : PyTorch, scikit-learn et Google Colab
+
+SvelteShipSolutions - Application Web complète
+- Conception et développement d'un système modulaire de gestion logistique et de livraison avec suivi en temps réel et calcul de devis
+- Modélisation de données relationnelles et optimisation de requêtes avec Prisma ORM et SQL
+- Intégration d'API REST tierces (Google Places API) pour la validation d'adresses et la localisation interactive
+- Collaboration au sein d'une équipe Agile (cours SOEN 343) avec gestion des exigences et contrôle de versions Git
+- Interface réactive développée avec SvelteKit en privilégiant l'expérience utilisateur et la maintenabilité
+
+COMPÉTENCES TECHNIQUES
+
+Analyse d'affaires et de systèmes
+- Recueil des exigences, récits utilisateurs (User Stories), critères d'acceptation, modélisation de processus d'affaires, analyse de causes fondamentales, Agile / Scrum
+
+Programmation et bases de données
+- SQL, modélisation relationnelle (Prisma ORM), Python, JavaScript, Java, HTML5, CSS, SvelteKit, Node.js, Express.js
+
+Analyse de données et outils
+- Excel (formules, tableaux croisés dynamiques), Power BI, Jira, Confluence, Git, GitHub, VS Code, Google Colab
+
+Applications et soutien
+- Suite Microsoft 365, systèmes de billetterie d'entreprise, outils de diagnostic et de gestion d'incidents
+
+LANGUES
+Français - Courant
+Anglais - Courant

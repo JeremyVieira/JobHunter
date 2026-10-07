@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / ambient files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables, Local Configuration & Secrets
+outputs/*
+.env
+.env.*
+!.env.example
+*.env
+jobhunter/config/settings.local.py
+jobhunter/config/settings.local.json
+jobhunter/config/user_profile.local.json
+.streamlit/secrets.toml
+.aws/
+.ssh/
+credentials.json
+token.json
+service-account*.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+
+# SQLite Database & Local Data
+jobhunter/data/
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+
+# Sensitive Resume & Contact Data (Master Resumes)
+jobhunter/resume/master_resume.txt
+jobhunter/resume/master_resume_fr.txt
+jobhunter/resume/*.private.*
+jobhunter/resume/*.secret.*
+
+# Generated Outputs & Resumes
+jobhunter/outputs/resumes/*
+!jobhunter/outputs/resumes/.gitkeep
+jobhunter/outputs/daily_jobs.json
+jobhunter/outputs/daily_report.html
+jobhunter/outputs/*.json
+jobhunter/outputs/*.html
+jobhunter/outputs/*.pdf
+jobhunter/outputs/*.docx
+jobhunter/outputs/*.txt
+outputs/
+
+# Logs
+jobhunter/logs/*.log
+logs/
+*.log
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / Editor Files
+.vscode/
+.idea/
+.continue/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

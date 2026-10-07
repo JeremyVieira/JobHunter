@@ -1,0 +1,71 @@
+Candidate Name
+Montreal, QC
+(514) 000-0000
+candidate@example.com
+https://github.com/username
+
+PROFESSIONAL SUMMARY
+Software Engineering graduate with practical IT support and technical analysis experience. Demonstrated strengths in systems troubleshooting, requirements elicitation, workflow optimization, and cross-functional collaboration. Bilingual (French/English fluent) with a strong foundation in database modeling, API architecture, and analytical problem-solving.
+
+EXPERIENCE
+
+Company A, Montreal — End User Support Analyst
+April 2024 - Current
+- Part of a core team delivering IT support and technical issue resolution for corporate operations across Quebec
+- Conducted root-cause analysis on critical system incidents, coordinating with technical teams to minimize operational disruption
+- Provided emergency on-site technical support and hardware/software diagnostics whenever needed
+- Collaborated with cross-functional team members across Canada to align support processes and systems
+- Authored comprehensive technical documentation and standardized troubleshooting guides for the internal knowledge base
+
+Company B, Montreal — IT Help Desk
+January 2024 - April 2024
+- Troubleshot and resolved complex hardware, software, and network issues, minimizing downtime and optimizing system performance
+- Elicited user requirements and translated operational concerns into actionable technical support solutions for a large enterprise
+- Maintained detailed documentation of incident workflows, system configurations, and recurring issue resolutions
+- Coordinated with end-users and technical teams to implement seamless process and software solutions
+
+EDUCATION
+
+Concordia University, Montreal — Bachelor of Science in Software Engineering
+September 2022 - June 2026
+- Member of the Institute for Co-operative Education
+- Pursuing degree with practical work experience component
+
+Vanier College, Montreal — DEC (Diploma of College Studies) in Computer Science and Mathematics
+August 2020 - April 2022
+- Completed foundational coursework in computer science and mathematics
+
+PROJECTS
+
+Colorectal Cancer Detection Using Deep Learning
+- Developed and implemented a deep learning solution for automated colorectal cancer detection using ResNet18 architecture with 100% classification accuracy
+- Implemented comprehensive data preprocessing and augmentation pipeline using PyTorch and torchvision
+- Achieved perfect accuracy in classifying histological images into three tissue categories (Mucosa, Normal, and Stroma)
+- Utilized GPU acceleration and cross-validation techniques to optimize model performance
+- Applied industry-standard tools including PyTorch, scikit-learn, and Google Colab
+- Evaluated model performance through rigorous validation metrics and confusion matrix analysis
+
+SvelteShipSolutions — Full-Stack Web Application
+- Designed and built a modular shipping and logistics web application featuring real-time package tracking and automated rate quoting
+- Modeled structured relational data and optimized schema queries utilizing Prisma ORM and SQL
+- Integrated third-party REST APIs (Google Places API) for address validation and interactive location selection
+- Collaborated in an Agile team (SOEN 343) practicing iterative sprints, requirement reviews, and Git version control
+- Built responsive UI workflows with SvelteKit emphasizing usability, component reusability, and maintainability
+
+TECHNICAL SKILLS
+
+Business & Systems Analysis
+- Requirements Gathering, User Stories & Acceptance Criteria, Process Mapping, Workflow Diagrams, Root Cause Analysis, Agile / Scrum
+
+Programming & Databases
+- SQL, Relational Database Modeling (Prisma ORM), Python, JavaScript, Java, HTML5, CSS, SvelteKit, Node.js, Express.js
+
+Data Analysis & Tools
+- Excel (Formulas, Pivot Tables), Power BI, Jira, Confluence, Git, GitHub, VS Code, Google Colab
+
+Applications & Support
+- Microsoft 365 Suite, Enterprise Ticketing Systems, Remote Support Tools, Incident Management
+
+LANGUAGES
+French - Fluent
+English - Fluent
