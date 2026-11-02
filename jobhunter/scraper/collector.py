@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -15,6 +16,7 @@ from jobspy import scrape_jobs
 
 try:
     from jobhunter.config.settings import (
+        COMPANY_CAREER_URLS,
         JOB_SEARCH_LOCATION,
         JOB_SEARCH_TERMS,
         JOBSPY_PROXIES,
@@ -24,6 +26,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     try:
         from config.settings import (
+            COMPANY_CAREER_URLS,
             JOB_SEARCH_LOCATION,
             JOB_SEARCH_TERMS,
             JOBSPY_PROXIES,
@@ -35,6 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover
         JOB_SEARCH_TERMS = []
         JOBSPY_PROXIES = None
         JOBSPY_SITES = ["indeed", "linkedin", "zip_recruiter", "glassdoor", "google"]
+        COMPANY_CAREER_URLS = []
 
         @dataclass
         class JobListing:  # type: ignore[no-redef]
@@ -50,6 +54,28 @@ except ModuleNotFoundError:  # pragma: no cover
 
             def to_dict(self):
                 return asdict(self)
+
+
+try:
+    from jobhunter.config import settings as _settings
+    from jobhunter.textutils import contains_any_term, normalize_text
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        from config import settings as _settings
+        from textutils import contains_any_term, normalize_text
+    except ModuleNotFoundError:
+        _settings = None
+
+        def normalize_text(value: str) -> str:  # type: ignore[misc]
+            return " ".join("".join(c if c.isalnum() else " " for c in (value or "").lower()).split())
+
+        def contains_any_term(text: str, terms) -> bool:  # type: ignore[misc]
+            padded = f" {text} "
+            return any(f" {normalize_text(term)} " in padded for term in terms)
+
+
+def _setting(name: str, default: Any) -> Any:
+    return getattr(_settings, name, default) if _settings is not None else default
 
 
 JOBICY_API_URL = "https://jobicy.com/api/v2/remote-jobs?count=50"
@@ -101,13 +127,16 @@ DEFAULT_SEARCH_TERMS = [
 EXCLUDED_TITLE_TERMS = (
     "manager",
     "director",
-    "vp ",
+    "vp",
     "vice president",
     "head of",
     "chief",
     "president",
     "executive",
     "general manager",
+    "gestionnaire",
+    "directeur",
+    "directrice",
 )
 
 # Company-name fragments that signal the poster is hiding who they are, which
@@ -144,6 +173,8 @@ SHADY_DESCRIPTION_TERMS = (
 # A real posting almost always runs longer than this; a description this thin is
 # usually a stub/spam listing rather than an actual job ad worth reading.
 MIN_DESCRIPTION_LENGTH = 80
+# Long enough to keep requirement sections that sit at the bottom of a posting.
+MAX_DESCRIPTION_CHARS = 12000
 LOGGER = logging.getLogger(__name__)
 MAX_GET_ATTEMPTS = 3
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -182,6 +213,35 @@ def _request_get(url: str, *, timeout: int = 20, **kwargs):
 
     raise RuntimeError(f"GET request failed after {MAX_GET_ATTEMPTS} attempts: {url}")
 
+REQUEST_DELAY_SECONDS = float(_setting("REQUEST_DELAY_SECONDS", 0.3))
+
+
+def _polite_sleep() -> None:
+    """Small pause between requests to the same provider (tests set the delay to 0)."""
+    if REQUEST_DELAY_SECONDS > 0:
+        time.sleep(REQUEST_DELAY_SECONDS)
+
+
+def _request_post(url: str, *, timeout: int = 20, **kwargs):
+    """POST with the same retry/backoff policy as ``_request_get``."""
+    for attempt in range(1, MAX_GET_ATTEMPTS + 1):
+        try:
+            response = requests.post(url, timeout=timeout, **kwargs)
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == MAX_GET_ATTEMPTS:
+                raise
+            LOGGER.warning("POST request failed on attempt %s/%s: %s", attempt, MAX_GET_ATTEMPTS, url, exc_info=True)
+            time.sleep(0.25 * 2 ** (attempt - 1))
+            continue
+        status_code = getattr(response, "status_code", 200)
+        if status_code in RETRYABLE_STATUS_CODES and attempt < MAX_GET_ATTEMPTS:
+            time.sleep(0.25 * 2 ** (attempt - 1))
+            continue
+        response.raise_for_status()
+        return response
+    raise RuntimeError(f"POST request failed after {MAX_GET_ATTEMPTS} attempts: {url}")
+
+
 # Companies large/stable enough that startup-culture language in their own JD (e.g.
 # "fast-paced") shouldn't count against them. Kept loosely in sync with
 # scoring.CompositeScorer.KNOWN_ESTABLISHED_COMPANIES; duplicated here so this file
@@ -189,7 +249,7 @@ def _request_get(url: str, *, timeout: int = 20, **kwargs):
 KNOWN_ESTABLISHED_COMPANIES = (
     "rbc", "royal bank", "td bank", "td canada trust", "scotiabank", "bmo",
     "bank of montreal", "national bank", "desjardins", "sun life", "manulife",
-    "intact", "cgi", "cae", "bombardier", "air canada", "hydro quebec",
+    "intact", "cmls", "coveo", "cgi", "cae", "bombardier", "air canada", "hydro quebec",
     "loto quebec", "caisse de depot", "bell canada", "rogers", "telus",
     "videotron", "shopify", "lightspeed", "nuvei", "ubisoft", "ericsson", "ibm",
     "microsoft", "google", "amazon", "meta", "salesforce", "sap", "oracle",
@@ -221,14 +281,17 @@ TINY_STARTUP_SIGNAL_TERMS = (
 
 
 def _normalize_for_filter(value: str) -> str:
-    return (value or "").lower()
+    return normalize_text(value or "")
 
 
 def is_excluded_title(title: str) -> bool:
     """True if a title is a structural mismatch (management/executive) regardless
-    of how well the rest of the posting reads."""
+    of how well the rest of the posting reads. Whole-word match; entry-level
+    "Associate Product Manager" programs are the one exception."""
     text = _normalize_for_filter(title)
-    return any(term in text for term in EXCLUDED_TITLE_TERMS)
+    if contains_any_term(text, ("associate product manager", "apm")):
+        return False
+    return contains_any_term(text, EXCLUDED_TITLE_TERMS)
 
 
 def is_shady_posting(job: dict[str, Any]) -> bool:
@@ -238,9 +301,9 @@ def is_shady_posting(job: dict[str, Any]) -> bool:
     company = _normalize_for_filter(job.get("company", ""))
     description = _normalize_for_filter(job.get("description", ""))
 
-    if any(term in company for term in SHADY_COMPANY_NAME_TERMS):
+    if contains_any_term(company, SHADY_COMPANY_NAME_TERMS):
         return True
-    if any(term in description for term in SHADY_DESCRIPTION_TERMS):
+    if contains_any_term(description, SHADY_DESCRIPTION_TERMS):
         return True
     if description and len(description) < MIN_DESCRIPTION_LENGTH:
         return True
@@ -254,12 +317,12 @@ def is_likely_tiny_startup(job: dict[str, Any]) -> bool:
     will under-flag (a real tiny startup that doesn't say so in the JD slips
     through) but should rarely over-flag a genuinely established employer."""
     company = _normalize_for_filter(job.get("company", ""))
-    if any(name in company for name in KNOWN_ESTABLISHED_COMPANIES):
+    if contains_any_term(company, KNOWN_ESTABLISHED_COMPANIES):
         return False
-    if any(term in company for term in ("labs", "forge", "ventures", "startup")):
+    if contains_any_term(company, ("labs", "forge", "ventures", "startup")):
         return True
     description = _normalize_for_filter(job.get("description", ""))
-    if any(term in description for term in TINY_STARTUP_SIGNAL_TERMS):
+    if contains_any_term(description, TINY_STARTUP_SIGNAL_TERMS):
         return True
     return False
 
@@ -292,6 +355,222 @@ class BaseScraper(ABC):
     def scrape(self) -> list[dict[str, Any]]:
         """Fetch and return normalized job listings."""
         pass
+
+
+def _career_url_configs(values: list[str]) -> list[tuple[str, str]]:
+    configs = []
+    for value in values:
+        company, separator, url = value.partition("|")
+        if separator and company.strip() and url.strip():
+            candidate = url.strip()
+            if _is_valid_http_url(candidate):
+                configs.append((company.strip(), candidate))
+            else:
+                LOGGER.warning("Skipping invalid career page URL for %s: %r", company.strip(), candidate)
+    return configs
+
+
+def _is_valid_http_url(value: str) -> bool:
+    """Return whether a value is safe to pass to requests as an HTTP URL."""
+    try:
+        parsed = urlsplit(value.strip())
+        hostname = parsed.hostname
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not hostname or not parsed.netloc:
+        return False
+    if any(character.isspace() for character in value):
+        return False
+    if ":" in hostname:
+        return True
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", hostname):
+        return False
+    labels = hostname.rstrip(".").split(".")
+    return all(
+        label
+        and len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        for label in labels
+    )
+
+
+class CompanyCareerPageScraper(BaseScraper):
+    """Fetch public company career pages containing static JobPosting data.
+
+    Many enterprise career sites publish schema.org JobPosting JSON-LD even
+    when their search UI is rendered by JavaScript. This connector handles the
+    static portion without login, browser automation, or an API key.
+    """
+
+    HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/127.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-CA,en;q=0.9",
+    }
+
+    def __init__(
+        self,
+        pages: list[tuple[str, str]] | None = None,
+        timeout: int = 20,
+        max_detail_pages: int | None = None,
+    ):
+        self.pages = pages if pages is not None else _career_url_configs(COMPANY_CAREER_URLS)
+        self.timeout = timeout
+        self.max_detail_pages = (
+            max_detail_pages
+            if max_detail_pages is not None
+            else int(_setting("CAREER_PAGE_MAX_DETAIL_PAGES", 15))
+        )
+        self.detected_boards: list[tuple[str, str, str]] = []  # (company, ats, token) for logging
+
+    def scrape(self) -> list[dict[str, Any]]:
+        """Collect postings from each career page.
+
+        Strategy per page: (1) JobPosting JSON-LD on the page itself; (2) detect the
+        employer's applicant-tracking system (Greenhouse, Lever, Ashby, Workable,
+        SmartRecruiters, Recruitee, Workday) from links/embeds and use its public job
+        API; (3) otherwise follow job-looking links and read their JSON-LD.
+        """
+        try:
+            from jobhunter.scraper.ats import detect_ats, scrapers_for_detections
+        except ModuleNotFoundError:  # pragma: no cover
+            from scraper.ats import detect_ats, scrapers_for_detections
+
+        jobs: list[dict[str, Any]] = []
+        seen_boards: set[tuple[str, str]] = set()
+        for company, page_url in self.pages:
+            if not _is_valid_http_url(page_url):
+                LOGGER.warning("Skipping invalid career page URL for %s: %r", company, page_url)
+                continue
+            try:
+                response = _request_get(page_url, headers=self.HEADERS, timeout=self.timeout)
+                html = response.text
+                page_jobs = self._parse_page(html, company, page_url)
+                jobs.extend(page_jobs)
+
+                ats_jobs: list[dict[str, Any]] = []
+                detections = [
+                    d for d in detect_ats(html, page_url) if (d["ats"], d["key"]) not in seen_boards
+                ]
+                for detection in detections:
+                    seen_boards.add((detection["ats"], detection["key"]))
+                    self.detected_boards.append((company, detection["ats"], detection["key"]))
+                    LOGGER.info("Detected %s board %r for %s.", detection["ats"], detection["key"], company)
+                for scraper in scrapers_for_detections(company, detections):
+                    try:
+                        ats_jobs.extend(scraper.scrape())
+                    except Exception:
+                        LOGGER.exception("Detected ATS scrape failed for %s.", company)
+                jobs.extend(ats_jobs)
+
+                if not page_jobs and not ats_jobs:
+                    jobs.extend(self._follow_detail_links(html, company, page_url))
+            except Exception:
+                LOGGER.exception("Company career page request failed for %s.", company)
+        return jobs
+
+    _JOB_LINK_HINTS = (
+        "/job/", "/jobs/", "/careers/", "/career/", "/emploi", "/emplois/", "/posting",
+        "/position", "/opening", "/requisition", "/vacancy", "/offre",
+    )
+
+    def _follow_detail_links(self, html: str, company: str, page_url: str) -> list[dict[str, Any]]:
+        """Fetch job-looking links from a listing page and read each one's JSON-LD."""
+        from urllib.parse import urljoin
+
+        base_host = urlparse(page_url).netloc.lower().removeprefix("www.")
+        base_domain = ".".join(base_host.split(".")[-2:])
+        soup = BeautifulSoup(html, "html.parser")
+        links: list[str] = []
+        for anchor in soup.find_all("a", href=True):
+            href = urljoin(page_url, anchor["href"].strip())
+            parsed = urlparse(href)
+            if parsed.scheme not in {"http", "https"} or href.lower().endswith((".pdf", ".jpg", ".png")):
+                continue
+            host = parsed.netloc.lower().removeprefix("www.")
+            if not host.endswith(base_domain):
+                continue
+            path = parsed.path.lower() + "/"
+            if not any(hint in path for hint in self._JOB_LINK_HINTS):
+                continue
+            canonical = canonical_job_url(href)
+            if canonical == canonical_job_url(page_url) or canonical in links:
+                continue
+            links.append(canonical)
+            if len(links) >= self.max_detail_pages:
+                break
+
+        jobs: list[dict[str, Any]] = []
+        for link in links:
+            try:
+                _polite_sleep()
+                detail = _request_get(link, headers=self.HEADERS, timeout=self.timeout)
+                for job in self._parse_page(detail.text, company, link):
+                    job["url"] = job["url"] or link
+                    jobs.append(job)
+            except Exception:
+                LOGGER.debug("Detail page failed for %s: %s", company, link, exc_info=True)
+        return jobs
+
+    @staticmethod
+    def _parse_page(html: str, company: str, page_url: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(html, "html.parser")
+        jobs: list[dict[str, Any]] = []
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                payload = json.loads(script.string or script.get_text())
+            except (TypeError, json.JSONDecodeError):
+                LOGGER.debug("Invalid JSON-LD skipped on %s.", page_url)
+                continue
+            records = payload if isinstance(payload, list) else [payload]
+            for item in records:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("@type") == "ItemList":
+                    for element in item.get("itemListElement", []):
+                        item_data = element.get("item", element) if isinstance(element, dict) else {}
+                        if isinstance(item_data, dict) and item_data.get("@type") == "JobPosting":
+                            jobs.append(CompanyCareerPageScraper._normalize_job_posting(
+                                item_data, company, page_url
+                            ))
+                elif item.get("@type") == "JobPosting":
+                    jobs.append(CompanyCareerPageScraper._normalize_job_posting(
+                        item, company, page_url
+                    ))
+        return [job for job in jobs if job["url"]]
+
+    @staticmethod
+    def _normalize_job_posting(item: dict[str, Any], company: str, page_url: str) -> dict[str, Any]:
+        location_data = item.get("jobLocation") or {}
+        if isinstance(location_data, list):
+            location_data = location_data[0] if location_data else {}
+        address = location_data.get("address", {}) if isinstance(location_data, dict) else {}
+        location = ", ".join(
+            str(value).strip()
+            for value in (
+                address.get("addressLocality"),
+                address.get("addressRegion"),
+                address.get("addressCountry"),
+            )
+            if value
+        ) or ("Remote" if item.get("jobLocationType") == "TELECOMMUTE" else "Unknown")
+        description = BeautifulSoup(
+            str(item.get("description") or ""), "html.parser"
+        ).get_text(" ", strip=True)
+        return normalize_job({
+            "title": item.get("title"),
+            "company": company,
+            "location": location,
+            "remote_status": "Remote" if item.get("jobLocationType") == "TELECOMMUTE" else "On-site",
+            "salary": "Not disclosed",
+            "description": description,
+            "posting_date": str(item.get("datePosted") or "Unknown")[:10],
+            "url": item.get("url") or page_url,
+            "source": "company-career-page",
+        })
 
 
 class JobicyScraper(BaseScraper):
@@ -438,13 +717,27 @@ class JobSpyScraper(BaseScraper):
     def __init__(
         self,
         search_terms: list[str] | None = None,
-        results_wanted_per_term: int = 15,
+        results_wanted_per_term: int | None = None,
         proxies: list[str] | str | None = None,
         location: str | None = None,
         sites: list[str] | None = None,
+        hours_old: int | None = None,
+        fetch_linkedin_descriptions: bool | None = None,
     ):
         self.search_terms = search_terms or JOB_SEARCH_TERMS or DEFAULT_SEARCH_TERMS
-        self.results_wanted_per_term = results_wanted_per_term
+        self.results_wanted_per_term = (
+            results_wanted_per_term
+            if results_wanted_per_term is not None
+            else int(_setting("JOBSPY_RESULTS_PER_TERM", 15))
+        )
+        # Fresh postings get disproportionate attention; default window is 72 hours.
+        self.hours_old = hours_old if hours_old is not None else int(_setting("JOBSPY_HOURS_OLD", 72))
+        # LinkedIn's search results only carry a snippet unless descriptions are fetched.
+        self.fetch_linkedin_descriptions = (
+            fetch_linkedin_descriptions
+            if fetch_linkedin_descriptions is not None
+            else bool(_setting("JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS", True))
+        )
         self.proxies = proxies if proxies is not None else JOBSPY_PROXIES
         self.location = location or JOB_SEARCH_LOCATION
         self.sites = sites or JOBSPY_SITES
@@ -462,7 +755,8 @@ class JobSpyScraper(BaseScraper):
                     location=self.location,
                     results_wanted=self.results_wanted_per_term,
                     country_indeed="Canada",
-                    hours_old=168,
+                    hours_old=self.hours_old,
+                    linkedin_fetch_description=self.fetch_linkedin_descriptions,
                     proxies=self.proxies,
                 )
                 for item in listings.to_dict(orient="records"):
@@ -490,7 +784,7 @@ class JobSpyScraper(BaseScraper):
                             {
                                 "title": title,
                                 "company": company,
-                                "location": _jobspy_text(item.get("location"), "Remote"),
+                                "location": _jobspy_text(item.get("location"), "Unknown"),
                                 "remote_status": "Remote" if item.get("is_remote") else "On-site",
                                 "salary": salary,
                                 "description": _jobspy_text(item.get("description")),
@@ -522,15 +816,12 @@ LEVER_API_TEMPLATE = "https://api.lever.co/v0/postings/{token}?mode=json"
 # The handful below are just confirmed-working examples to show the shape of the
 # list — replace/extend with the specific companies you're actually targeting
 # (established employers you trust, ideally ones already on your radar).
-GREENHOUSE_COMPANIES: list[tuple[str, str]] = [
-    ("Stripe", "stripe"),
-    ("GitLab", "gitlab"),
-    ("Databricks", "databricks"),
-]
+# Override with GREENHOUSE_COMPANIES / LEVER_COMPANIES in .env ("Name|token,Name|token").
+GREENHOUSE_COMPANIES: list[tuple[str, str]] = list(
+    _setting("GREENHOUSE_BOARDS", [("Stripe", "stripe"), ("GitLab", "gitlab"), ("Databricks", "databricks")])
+)
 
-LEVER_COMPANIES: list[tuple[str, str]] = [
-    ("Figma", "figma"),
-]
+LEVER_COMPANIES: list[tuple[str, str]] = list(_setting("LEVER_BOARDS", [("Figma", "figma")]))
 
 
 class GreenhouseScraper(BaseScraper):
@@ -650,6 +941,7 @@ class ScraperFactory:
     """Factory to create registered job scrapers."""
 
     _registry: dict[str, type[BaseScraper]] = {
+        "company-career-page": CompanyCareerPageScraper,
         "jobicy": JobicyScraper,
         "remotive": RemotiveScraper,
         "arbeitnow": ArbeitnowScraper,
@@ -834,10 +1126,12 @@ def normalize_job(job: dict) -> dict:
     normalized = {
         "title": (job.get("title") or "Unknown role").strip(),
         "company": (job.get("company") or "Unknown").strip(),
-        "location": (job.get("location") or "Montreal, QC").strip(),
+        # A missing location is "Unknown" (never silently Montreal or Remote): the
+        # location filter decides what to do with it.
+        "location": (job.get("location") or "Unknown").strip(),
         "remote_status": (job.get("remote_status") or "Hybrid/Remote").strip(),
         "salary": (job.get("salary") or "Not disclosed").strip(),
-        "description": (job.get("description") or "").strip()[:4000],
+        "description": (job.get("description") or "").strip()[:MAX_DESCRIPTION_CHARS],
         "posting_date": (job.get("posting_date") or "Unknown").strip(),
         "url": (job.get("url") or "").strip(),
         "source": (job.get("source") or "manual").strip(),

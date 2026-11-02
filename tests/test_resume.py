@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from jobhunter.resume import tailor
+from jobhunter.resume import tailoring as tailoring_module
 from jobhunter.resume.tailor import (
     ats_analysis,
     export_cover_letter,
@@ -198,11 +199,9 @@ def synthetic_master_resume(monkeypatch):
             raise ValueError("language must be 'en' or 'fr'")
         return SYNTHETIC_RESUME_FR if language == "fr" else SYNTHETIC_RESUME_EN
 
-    def _fake_verified_resume_summary(language: str) -> str:
-        return SYNTHETIC_SUMMARY_FR if language == "fr" else SYNTHETIC_SUMMARY_EN
-
     monkeypatch.setattr(tailor, "build_master_resume", _fake_build_master_resume)
-    monkeypatch.setattr(tailor, "_verified_resume_summary", _fake_verified_resume_summary)
+    # No summary_variants.json in tests: the summary must stay exactly as authored.
+    monkeypatch.setattr(tailoring_module, "load_summary_variants", lambda language="en": {})
 
 
 def test_build_master_resume():
@@ -245,10 +244,19 @@ def test_tailor_resume_for_job_data_analyst():
     assert "Lakeside University" in resume
 
 
+def _project_headings(resume: str) -> list[str]:
+    """Heading lines inside the PROJECTS section of a rendered resume."""
+    lines = resume.splitlines()
+    start = lines.index("PROJECTS") + 1
+    end = next((i for i in range(start, len(lines)) if lines[i] in tailor.SECTION_HEADERS), len(lines))
+    return [line for line in lines[start:end] if line.strip() and not line.startswith("-")]
+
+
 def test_tailor_resume_for_job_product_analyst():
     resume = tailor_resume_for_job("Product Analyst", "CIBC")
     assert "Alex Example" in resume
-    assert "SvelteShipSolutions" in resume
+    # No posting text -> no evidence to rank by -> master order, still two projects
+    assert len(_project_headings(resume)) == 2
 
 
 def test_tailor_resume_selects_projects_relevant_to_posting():
@@ -273,15 +281,85 @@ def test_tailor_resume_for_software_role_surfaces_jobhunter_project():
     assert "ResNet18" in resume
 
 
-def test_tailor_resume_keeps_two_projects_when_only_one_matches():
+def test_tailor_resume_ranks_projects_by_evidence_and_keeps_two():
     resume = tailor_resume_for_job(
         "Systems Analyst",
         "Example Corp",
         job_description="SQL, APIs, and system architecture.",
     )
 
-    assert "JobHunter" in resume
-    assert "Colorectal Cancer Detection Using Deep Learning" in resume
+    headings = _project_headings(resume)
+    assert len(headings) == 2
+    # SvelteShipSolutions is the only project whose bullets show SQL and REST APIs
+    assert headings[0].startswith("SvelteShipSolutions")
+
+
+def test_tailor_resume_never_adds_or_rewrites_master_content():
+    from jobhunter.resume.verify import verify_resume
+
+    description = "Python, PyTorch, SQL, Docker, CI/CD, React Native, Terraform and Agile teams."
+    for title in ("Machine Learning Engineer", "Business Analyst", "Full-Stack Developer"):
+        for language in ("en", "fr"):
+            tailored = tailor_resume_for_job(title, "Example", language, description)
+            master = tailor.build_master_resume(language)
+            assert verify_resume(tailored, master) == []
+
+
+def test_tailor_resume_reorders_bullets_within_entries_by_posting_evidence():
+    resume = tailor_resume_for_job(
+        "Analyst",
+        "Example AI",
+        job_description="Applied scikit-learn and Google Colab for model evaluation.",
+    )
+    lines = resume.splitlines()
+    first = next(i for i, line in enumerate(lines) if "ResNet18 image-classification" in line)
+    sklearn = next(i for i, line in enumerate(lines) if "Applied scikit-learn" in line)
+    # the bullet that evidences the posting moves ahead of the unrelated bullet above it
+    assert sklearn < first
+
+
+def test_skill_groups_and_items_are_reordered_without_changing_membership():
+    resume = tailor_resume_for_job(
+        "Business Analyst",
+        "Example",
+        job_description="Requirements gathering, stakeholder communication and root cause analysis.",
+    )
+    lines = resume.splitlines()
+    skills_start = lines.index("TECHNICAL SKILLS") + 1
+    assert lines[skills_start] == "Support & Collaboration"
+    master_items = {"python", "sql", "git", "requirements gathering"}
+    all_items = {item.strip().lower() for line in lines[skills_start:] if line.startswith("-") for item in line[1:].split(",")}
+    assert master_items <= all_items
+
+
+def test_summary_variant_is_used_only_when_user_provides_one():
+    own_summary = "Software engineering graduate focused on Python backend and automation work."
+    resume = tailoring_module.tailor_resume_text(
+        tailor.build_master_resume("en"),
+        "Python Developer",
+        "Python services",
+        "en",
+        variants={"software": own_summary},
+    )
+    assert own_summary in resume
+    assert SYNTHETIC_SUMMARY_EN not in resume
+
+    unchanged = tailoring_module.tailor_resume_text(
+        tailor.build_master_resume("en"), "Python Developer", "Python services", "en", variants={}
+    )
+    assert SYNTHETIC_SUMMARY_EN in unchanged
+
+
+def test_explicit_bullet_tags_drive_ranking_and_are_never_rendered():
+    resume_text = (
+        "Alex\n\nEXPERIENCE\n\nAcme, Montreal — Developer\nJan 2024 - Current\n"
+        "- Wrote internal tooling for the team [tags: kubernetes, helm]\n"
+        "- Answered support tickets\n"
+    )
+    tailored = tailoring_module.tailor_resume_text(resume_text, "Platform Engineer", "Kubernetes operations", "en", variants={})
+    assert "[tags" not in tailored
+    bullets = [line for line in tailored.splitlines() if line.startswith("-")]
+    assert bullets[0].startswith("- Wrote internal tooling")
 
 
 def test_professional_summary_stays_general_across_job_families():
@@ -326,17 +404,22 @@ def test_tailor_resume_in_french_keeps_general_summary_and_adapts_projects():
 
 
 def test_generate_cover_letter():
-    letter = generate_cover_letter("Business Analyst", "Bell Canada")
+    letter = generate_cover_letter(
+        "Business Analyst", "Bell Canada", "SQL, requirements gathering and stakeholder communication."
+    )
     assert "Bell Canada" in letter
     assert "Business Analyst" in letter
-    assert "Lakeside University" in letter
-    assert "professional summary" in letter.lower()
+    assert "Lakeside University" in letter  # education sentence comes from the resume
+    # evidence comes from real resume bullets, not a pasted summary
+    assert "professional summary" not in letter.lower()
+    assert "Gathered requirements" in letter or "gathered requirements" in letter
 
 
 def test_generate_cover_letter_with_job_description():
     letter = generate_cover_letter("Business Analyst", "TD Bank", "SQL and analytics")
     assert "TD Bank" in letter
-    assert "sql" in letter.lower()
+    assert "SQL" in letter
+    assert len(letter.split()) < 320
 
 
 def test_cover_letter_sanitizes_scraped_markdown_and_html():
@@ -344,36 +427,34 @@ def test_cover_letter_sanitizes_scraped_markdown_and_html():
 
     letter = generate_cover_letter("Business Systems Analyst", "American Iron & Metal", description)
 
-    assert "Python, SQL, automation" in letter
     assert "**" not in letter
     assert "<p>" not in letter
+    assert "<strong>" not in letter
     assert "Company Description" not in letter
 
 
-def test_cover_letters_use_only_local_master_summary_for_candidate_claims(monkeypatch):
-    from jobhunter.resume import tailor
+def test_cover_letters_only_make_claims_found_in_the_master_resume(monkeypatch):
+    from jobhunter.resume.verify import verify_letter
 
-    master_summaries = {
-        "en": "Experienced hotel receptionist skilled in guest services and reservations.",
-        "fr": "Réceptionniste d'hôtel expérimentée en accueil et gestion de réservations.",
-    }
-    monkeypatch.setattr(
-        tailor,
-        "_verified_resume_summary",
-        lambda language: master_summaries[language],
+    hotel_resume = (
+        "Alex Example\nOttawa\n\nPROFESSIONAL SUMMARY\nExperienced hotel receptionist.\n\n"
+        "EXPERIENCE\n\nGrand Hotel, Ottawa — Front Desk Agent\nJan 2020 - Current\n"
+        "- Managed guest check-ins and resolved reservation issues for 120 guests per day\n"
     )
+    monkeypatch.setattr(tailor, "build_master_resume", lambda language="en": hotel_resume)
     monkeypatch.setitem(tailor.USER_PROFILE, "name", "Alex Example")
     monkeypatch.setitem(tailor.USER_PROFILE, "location", "Ottawa, ON")
 
-    english = tailor.generate_cover_letter("Guest Services Agent", "Example Hotel")
-    french = tailor.generate_cover_letter_french("Agente de réception", "Hôtel Exemple")
+    description = "Guest services, reservations, Python scripting and Kubernetes would be nice."
+    english = tailor.generate_cover_letter("Guest Services Agent", "Example Hotel", description)
 
-    assert master_summaries["en"] in english
-    assert master_summaries["fr"] in french
-    for letter in (english, french):
-        assert "Example Logistics Inc" not in letter
-        assert "Lakeside University" not in letter
-        assert "Alex Example" in letter
+    assert "Grand Hotel" in english
+    assert "120 guests per day" in english
+    assert "Alex Example" in english
+    # skills the resume lacks may be named as posting requirements but never claimed
+    assert verify_letter(english, hotel_resume, description) == []
+    assert "Lakeside University" not in english
+    assert "Example Logistics Inc" not in english
 
 
 def test_generate_french_cover_letter():
@@ -383,7 +464,37 @@ def test_generate_french_cover_letter():
     assert "RBC" in letter
     assert "SQL" in letter
     assert "Université Lakeside" in letter
-    assert "profil professionnel" in letter.lower()
+    assert "profil professionnel" not in letter.lower()
+
+
+def test_cover_letter_includes_company_hook_only_when_supplied():
+    without = generate_cover_letter("Python Developer", "Acme", "Python and SQL")
+    hook = "I admire how Acme builds logistics software for small shippers."
+    with_hook = generate_cover_letter("Python Developer", "Acme", "Python and SQL", company_hook=hook)
+    assert hook not in without
+    assert hook in with_hook
+
+
+def test_cover_letter_states_unmet_core_requirement_honestly():
+    description = "Looking for a Java developer. Required: Java and Spring Boot. Python is a plus."
+    letter = generate_cover_letter("Java Developer", "Acme", description)
+    # The synthetic resume lists Java in its skills, so there is no gap to confess...
+    assert "have not yet worked with" not in letter
+
+    # ...but for a language the resume truly lacks, the letter says so and names the
+    # closest tool the candidate actually used.
+    c_sharp = generate_cover_letter(
+        "C# Developer", "Acme", "Required: C# and .NET. Java experience is a plus."
+    )
+    assert "have not yet worked with C#" in c_sharp
+    assert "closest tool I have used is Java" in c_sharp
+
+
+def test_cover_letter_mentions_bilingual_ability_only_for_bilingual_postings():
+    bilingual = generate_cover_letter("Developer", "Acme", "Python. Bilingual English and French required.")
+    unilingual = generate_cover_letter("Developer", "Acme", "Python developer role.")
+    assert "fluent in both English and French" in bilingual
+    assert "English and French" not in unilingual
 
 
 def test_export_resume_docx():

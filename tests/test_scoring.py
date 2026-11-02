@@ -118,11 +118,23 @@ def test_title_match_score():
 
 
 def test_experience_match_score():
-    assert experience_match_score("Requires 2 years experience") == 90
-    assert experience_match_score("Requires 3 years of experience") == 90
-    assert experience_match_score("Requires 5 years experience") == 70
-    assert experience_match_score("Requires 10+ years experience") == 10
-    assert experience_match_score("No experience required") == 90
+    # candidate with 1 year of experience may stretch one year past it
+    assert experience_match_score("Requires 2 years experience", candidate_years=1) == 95
+    assert experience_match_score("Requires 3 years of experience", candidate_years=1) == 75
+    assert experience_match_score("Requires 5 years experience", candidate_years=1) == 35
+    assert experience_match_score("Requires 10+ years experience", candidate_years=1) == 10
+    assert experience_match_score("No experience required", candidate_years=1) == 95
+
+
+def test_experience_unstated_is_neutral_not_best_case():
+    assert experience_match_score("", candidate_years=1) == 80
+    assert experience_match_score("Great team, fun product.", candidate_years=1) == 80
+
+
+def test_experience_ignores_company_age_and_uses_lower_bound_of_ranges():
+    assert experience_match_score("Serving clients for 20 years.", candidate_years=0) == 80
+    assert experience_match_score("2-4 years of experience", candidate_years=1) == 95
+    assert experience_match_score("1-2 years experience; 5+ years leadership experience", 1) == 35
 
 
 def test_education_match_score():
@@ -369,5 +381,5 @@ def test_title_match_score_partial_match():
 
 def test_experience_match_score_edge_cases():
     """Test edge cases for experience scoring."""
-    assert experience_match_score("0 years") == 90
-    assert experience_match_score("") == 90
+    assert experience_match_score("0 years") == 80  # no mention of experience -> unknown
+    assert experience_match_score("") == 80

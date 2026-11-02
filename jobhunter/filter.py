@@ -3,30 +3,34 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any
-from unicodedata import normalize
 
 try:
     from jobhunter.config.settings import USER_PROFILE
+    from jobhunter.matching.levels import is_entry_level
     from jobhunter.models import JobListing, UserProfile
+    from jobhunter.textutils import contains_any_term, normalize_text
 except ModuleNotFoundError:  # pragma: no cover
     from config.settings import USER_PROFILE
+    from matching.levels import is_entry_level
     from models import JobListing, UserProfile
+    from textutils import contains_any_term, normalize_text
 
 
 def _title_matches_target(title: str, profile: UserProfile | dict[str, Any] | None = None) -> bool:
     prof = profile or USER_PROFILE
-    text = (title or "").lower()
+    text = normalize_text(title)
     target_roles = [
-        role.lower()
+        role
         for role in (
             prof.target_roles if isinstance(prof, UserProfile) else prof.get("target_roles", [])
         )
+        if normalize_text(role)
     ]
-    if any(role in text for role in target_roles):
+    if contains_any_term(text, target_roles):
         return True
-    return any(
-        keyword in text
-        for keyword in [
+    return contains_any_term(
+        text,
+        [
             "software engineer",
             "software developer",
             "developer",
@@ -58,29 +62,78 @@ def _title_matches_target(title: str, profile: UserProfile | dict[str, Any] | No
             "analyste",
             "ingenieur",
             "developpeur",
-        ]
+        ],
     )
+
+
+# Towns that make up Greater Montreal. Postings often list the borough or suburb
+# ("Saint-Laurent, QC") instead of "Montreal".
+MONTREAL_AREA_TERMS = (
+    "montreal", "laval", "longueuil", "brossard", "west island", "south shore",
+    "north shore", "saint laurent", "ville saint laurent", "dorval", "pointe claire",
+    "kirkland", "dollard des ormeaux", "boucherville", "saint lambert", "westmount",
+    "town of mount royal", "anjou", "lasalle", "verdun", "terrebonne", "blainville",
+    "repentigny", "vaudreuil",
+)
+
+UNKNOWN_LOCATIONS = frozenset({"", "unknown", "n/a", "na", "none", "nan", "not specified", "null"})
+
+# Markers that a "remote" job is only open to residents of another region.
+REMOTE_REGION_MARKERS = (
+    "us", "usa", "united states", "uk", "united kingdom", "europe", "emea", "apac",
+    "latam", "india", "germany", "spain", "poland", "australia", "brazil", "mexico",
+    "philippines", "singapore", "ireland", "netherlands",
+)
+REMOTE_REGION_PHRASES = (
+    "us only", "u s only", "usa only", "united states only", "us based", "u s based",
+    "must be located in the us", "must be located in the u s",
+    "must be located in the united states", "must reside in the us",
+    "must reside in the united states", "must live in the us",
+    "authorized to work in the us", "authorized to work in the u s",
+    "authorized to work in the united states", "eligible to work in the us",
+    "eligible to work in the united states", "us work authorization",
+    "u s work authorization", "us citizens only", "u s citizens only", "us citizen",
+    "within the united states", "residents of the united states",
+    "based in the united states", "open to candidates in the us",
+    "uk based", "must be based in the uk", "eu based", "right to work in the uk",
+)
+OPEN_REMOTE_MARKERS = ("canada", "canadian", "worldwide", "anywhere", "global", "north america")
 
 
 def _is_relevant_location(location: str) -> bool:
-    text = normalize("NFKD", location or "").encode("ascii", "ignore").decode("ascii").lower()
-    return (
-        "montreal" in text
-        or "remote" in text
-        or "hybrid" in text
-        or "quebec" in text
-        or "qc" in text
-    )
+    text = normalize_text(location)
+    return contains_any_term(text, MONTREAL_AREA_TERMS) or contains_any_term(text, ("remote",))
 
 
-def _is_entry_level(job: dict[str, Any]) -> bool:
-    title = (job.get("title") or "").lower()
-    description = (job.get("description") or "").lower()
-    title_signals = ("junior", "entry level", "associate", "new grad", "graduate", "coordinator")
-    experience_signals = ("0 years", "1 year", "1-2 years", "0-2 years", "up to 2 years")
-    return any(signal in title for signal in title_signals) or any(
-        signal in description for signal in experience_signals
-    )
+def is_montreal_area_or_remote(location: str) -> bool:
+    """Return whether a posting is local to Greater Montreal or generically remote."""
+    return _is_relevant_location(location)
+
+
+def location_is_unknown(location: str | None) -> bool:
+    return normalize_text(location or "") in UNKNOWN_LOCATIONS
+
+
+def remote_region_restricted(job: dict[str, Any]) -> bool:
+    """True for "remote" postings that are only open to another country/region.
+
+    A generic "Remote" label says nothing about where you may live. We reject only
+    on explicit evidence (a region in the location, or work-authorization wording in
+    the description) and never when the posting also mentions Canada or "worldwide".
+    """
+    location = normalize_text(job.get("location") or "")
+    description = normalize_text(str(job.get("description") or "")[:6000])
+    if contains_any_term(location, OPEN_REMOTE_MARKERS) or contains_any_term(
+        description, OPEN_REMOTE_MARKERS
+    ):
+        return False
+    if contains_any_term(location, REMOTE_REGION_MARKERS):
+        return True
+    return contains_any_term(description, REMOTE_REGION_PHRASES)
+
+
+# Backwards-compatible alias; the implementation now lives in matching.levels.
+_is_entry_level = is_entry_level
 
 
 class IJobPredicate(ABC):
@@ -103,11 +156,21 @@ class TargetRolePredicate(IJobPredicate):
 class LocationAndRemotePredicate(IJobPredicate):
     def evaluate(self, job: dict[str, Any]) -> bool:
         location = job.get("location", "") or ""
-        description = (job.get("description", "") or "").lower()
-        remote_status = (job.get("remote_status", "") or "").lower()
-        if "remote" in remote_status or "remote" in description:
+        if location_is_unknown(location):
+            # No location at all: only keep the posting if its own text places it in
+            # Greater Montreal. (A missing location must never be read as "Remote".)
+            text = normalize_text(f"{job.get('title', '')} {str(job.get('description') or '')[:2000]}")
+            return contains_any_term(text, MONTREAL_AREA_TERMS)
+        # A remote label must not override an explicit non-local office
+        # location (for example, a Seattle role whose description mentions
+        # occasional remote work). Only generic remote locations are accepted.
+        if not is_montreal_area_or_remote(location):
+            return False
+        local = contains_any_term(normalize_text(location), MONTREAL_AREA_TERMS)
+        if local:
             return True
-        return _is_relevant_location(location)
+        # Generic remote: reject when it is explicitly limited to another region.
+        return not remote_region_restricted(job)
 
 
 class MinFitScorePredicate(IJobPredicate):
@@ -124,16 +187,16 @@ class MinFitScorePredicate(IJobPredicate):
 class RoleBlacklistPredicate(IJobPredicate):
     DEFAULT_BLACKLIST = (
         "senior",
-        "sr ",
-        "sr.",
+        "sr",
         "lead",
+        "leader",
         "principal",
         "staff",
         "manager",
         "director",
         "head of",
         "vice president",
-        "vp ",
+        "vp",
         "gestionnaire",
         "directeur",
         "chef de",
@@ -149,14 +212,19 @@ class RoleBlacklistPredicate(IJobPredicate):
         self.blacklist = tuple(blacklist) if blacklist is not None else self.DEFAULT_BLACKLIST
 
     def evaluate(self, job: dict[str, Any]) -> bool:
-        title = (job.get("title", "") or "").lower()
-        entry_level_title = any(signal in title for signal in ("junior", "associate", "new grad", "graduate", "engineer i"))
+        title = normalize_text(job.get("title", "") or "")
+        entry_level_title = contains_any_term(
+            title, ("junior", "associate", "new grad", "graduate", "engineer i")
+        )
+        # "Associate Product Manager" programs are entry-level despite "manager".
+        apm_title = contains_any_term(title, ("associate product manager", "apm"))
         blocked_terms = tuple(
             term
             for term in self.blacklist
             if not (entry_level_title and term == "full stack developer")
+            and not (apm_title and normalize_text(term) == "manager")
         )
-        return not any(term in title for term in blocked_terms)
+        return not contains_any_term(title, blocked_terms)
 
 
 class CompanyRedFlagPredicate(IJobPredicate):
@@ -206,14 +274,16 @@ class CompanyRedFlagPredicate(IJobPredicate):
     )
 
     def evaluate(self, job: dict[str, Any]) -> bool:
-        company = (job.get("company", "") or "").lower()
-        description = (job.get("description", "") or "").lower()
+        company = normalize_text(job.get("company", "") or "")
+        description = normalize_text(job.get("description", "") or "")
 
-        if any(agency in company for agency in self.STAFFING_AGENCY_NAMES):
+        if contains_any_term(company, self.STAFFING_AGENCY_NAMES):
             return False
-        if any(phrase in description for phrase in self.AGENCY_DESCRIPTION_PHRASES):
+        if contains_any_term(description, self.AGENCY_DESCRIPTION_PHRASES):
             return False
-        if any(signal in description or signal in company for signal in self.TINY_OR_STEALTH_SIGNALS):
+        if contains_any_term(description, self.TINY_OR_STEALTH_SIGNALS) or contains_any_term(
+            company, self.TINY_OR_STEALTH_SIGNALS
+        ):
             return False
         return True
 

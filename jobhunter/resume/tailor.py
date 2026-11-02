@@ -25,38 +25,38 @@ from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate
 
 try:
     from jobhunter.config.settings import OUTPUT_DIR, USER_PROFILE
+    from jobhunter.matching.requirements import analyze_posting, candidate_inventory
+    from jobhunter.matching.skills import expand_inventory, get_matcher
+    from jobhunter.resume.letter import build_cover_letter
+    from jobhunter.resume.tailoring import (
+        DATE_LINE_PATTERN,
+        SECTION_HEADERS,
+        strip_tags,
+        strip_tags_from_text,
+        tailor_resume_text,
+    )
+    from jobhunter.resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
+    from jobhunter.resume.verify import verify_letter, verify_resume
+    from jobhunter.textutils import detect_language, mentions_bilingual
 except ModuleNotFoundError:  # pragma: no cover
     from config.settings import OUTPUT_DIR, USER_PROFILE
+    from matching.requirements import analyze_posting, candidate_inventory
+    from matching.skills import expand_inventory, get_matcher
+    from resume.letter import build_cover_letter
+    from resume.tailoring import (
+        DATE_LINE_PATTERN,
+        SECTION_HEADERS,
+        strip_tags,
+        strip_tags_from_text,
+        tailor_resume_text,
+    )
+    from resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
+    from resume.verify import verify_letter, verify_resume
+    from textutils import detect_language, mentions_bilingual
 
-SECTION_HEADERS = {
-    "PROFESSIONAL SUMMARY",
-    "EXPERIENCE",
-    "EDUCATION",
-    "PROJECTS",
-    "TECHNICAL SKILLS",
-    "LANGUAGES",
-    "PROFIL PROFESSIONNEL",
-    "EXPÉRIENCE",
-    "FORMATION",
-    "COMPÉTENCES TECHNIQUES",
-    "LANGUES",
-}
-# Sections whose body text is prose (a paragraph to read), not a job-title/company
-# line. The parser needs this distinction so the summary doesn't get bolded like
-# an experience entry.
-SUMMARY_SECTION_HEADERS = {"PROFESSIONAL SUMMARY", "PROFIL PROFESSIONNEL"}
 # Short factual lines (not prose, not a "Company - Title" heading) that should
 # render as plain text rather than a bold entry heading.
 PLAIN_TEXT_SECTION_HEADERS = SUMMARY_SECTION_HEADERS | {"LANGUAGES", "LANGUES"}
-SKILLS_SECTION_HEADERS = {"TECHNICAL SKILLS", "COMPÉTENCES TECHNIQUES"}
-# A date-range line ("April 2024 - Current", "Septembre 2022 - Juin 2026") always
-# contains a year; a "Company, City - Title" entry line never does. Using the
-# dash style itself to tell them apart is fragile -- the English master resume
-# happens to use an em-dash ("—") for entries, but the French one uses a plain
-# hyphen ("Montréal - Analyste..."), which collided with the old " - " check and
-# misclassified every French job/education entry as a date line. A year is a
-# reliable, language-independent signal instead.
-DATE_LINE_PATTERN = re.compile(r"(19|20)\d{2}")
 ACCENT_COLOR = RGBColor(31, 78, 121)
 ACCENT_HEX = "1F4E79"
 PDF_ACCENT_COLOR = colors.HexColor("#1F4E79")
@@ -136,7 +136,7 @@ class ResumeParser:
                 index += 1
                 continue
             if line.startswith("-"):
-                blocks.append(ResumeBlock("bullet", line[1:].strip()))
+                blocks.append(ResumeBlock("bullet", strip_tags(line[1:]).strip()))
                 index += 1
                 continue
             if current_section not in SUMMARY_SECTION_HEADERS and DATE_LINE_PATTERN.search(line):
@@ -158,118 +158,6 @@ class ResumeParser:
             blocks=blocks,
             raw_text=resume_text,
         )
-
-
-def _reorder_comma_list_by_relevance(items_line: str, job_description: str) -> str:
-    """Reorder a comma-separated skills bullet so items the posting actually
-    mentions come first. Never adds, removes, or rewords an item — it is a pure
-    reordering of what's already true, purely to help a human/ATS skim see the
-    overlap immediately."""
-    items = [item.strip() for item in items_line.split(",") if item.strip()]
-    jd_text = re.sub(r"[^a-z0-9+./#\s]", " ", (job_description or "").lower())
-    if not items or not jd_text.strip():
-        return items_line
-
-    def is_relevant(item: str) -> bool:
-        token = re.sub(r"[^a-z0-9+./#\s]", " ", item.lower()).strip()
-        return bool(token) and token in jd_text
-
-    matched = [item for item in items if is_relevant(item)]
-    unmatched = [item for item in items if not is_relevant(item)]
-    if not matched:
-        return items_line
-    return ", ".join(matched + unmatched)
-
-
-def _apply_skill_reordering(resume_text: str, job_description: str) -> str:
-    """Walk the raw resume text and reorder only the bullet lines that fall
-    under a Technical Skills section, leaving every other line untouched."""
-    if not job_description:
-        return resume_text
-    lines = resume_text.splitlines()
-    output: list[str] = []
-    current_section = None
-    for line in lines:
-        stripped = line.strip()
-        if stripped in SECTION_HEADERS:
-            current_section = stripped
-            output.append(line)
-            continue
-        if current_section in SKILLS_SECTION_HEADERS and stripped.startswith("-"):
-            bullet_text = stripped[1:].strip()
-            reordered = _reorder_comma_list_by_relevance(bullet_text, job_description)
-            output.append(f"- {reordered}")
-            continue
-        output.append(line)
-    return "\n".join(output)
-
-
-PROJECT_RELEVANCE_TERMS = {
-    "plazio": (
-        "cloud", "gcp", "google cloud", "azure", "terraform", "infrastructure as code",
-        "iac", "pub/sub", "pubsub", "message queue", "devops", "testing", "test coverage",
-        "qa", "automation", "ci/cd",
-    ),
-    "jobhunter": (
-        "python", "automation", "scraping", "streamlit", "sqlite", "job search", "ats",
-        "dashboard", "scheduler", "data pipeline", "fit score", "resume", "business analyst",
-        "systems analyst", "requirements",
-    ),
-    "colorectal": (
-        "machine learning", "deep learning", "pytorch", "torchvision", "computer vision",
-        "image classification", "resnet", "scikit-learn", "healthcare", "medical",
-    ),
-    "472-a2": (
-        "machine learning", "data science", "clustering", "decision tree", "mlp", "cnn",
-        "fashion-mnist", "pytorch", "scikit-learn", "classification", "analytics", "pandas",
-    ),
-    "svelteship": (
-        "svelte", "sveltekit", "javascript", "typescript", "full-stack", "web application",
-        "logistics", "delivery", "prisma", "rest api", "relational database", "payment",
-        "stripe", "business analyst", "product analyst",
-    ),
-    "campus guide": (
-        "mobile", "react native", "expo", "navigation", "mapping", "maps", "directions",
-        "calendar", "campus", "javascript", "typescript",
-    ),
-}
-
-
-def _tailor_projects(resume_text: str, job_title: str, job_description: str) -> str:
-    lines = resume_text.splitlines()
-    project_header = next(
-        (i for i, line in enumerate(lines) if line.strip() in {"PROJECTS", "PROJETS"}), None
-    )
-    if project_header is None:
-        return resume_text
-    section_end = next(
-        (i for i in range(project_header + 1, len(lines)) if lines[i].strip() in SECTION_HEADERS),
-        len(lines),
-    )
-
-    projects: list[list[str]] = []
-    for line in lines[project_header + 1:section_end]:
-        if line.strip() and not line.lstrip().startswith("-"):
-            projects.append([line])
-        elif projects:
-            projects[-1].append(line)
-    if not projects:
-        return resume_text
-
-    target = f"{job_title} {job_description}".lower()
-
-    def score(project: list[str]) -> int:
-        text = " ".join(project).lower()
-        key = next((key for key in PROJECT_RELEVANCE_TERMS if key in text), None)
-        if key is None:
-            return 0
-        return sum(term in target for term in PROJECT_RELEVANCE_TERMS[key])
-
-    ranked = sorted(enumerate(projects), key=lambda pair: (-score(pair[1]), pair[0]))
-    # Keep a second project when available so a sparse job description does not
-    # produce a resume with an unnecessarily thin project section.
-    selected = [project for _, project in ranked[:2]]
-    return "\n".join(lines[:project_header + 1] + [line for project in selected for line in project] + lines[section_end:])
 
 
 class IResumeExporter(ABC):
@@ -502,18 +390,17 @@ def build_master_resume(language: str = "en") -> str:
 def tailor_resume_for_job(
     job_title: str, company_name: str, language: str = "en", job_description: str = ""
 ) -> str:
-    """Emphasize verified skills and projects that best match a specific posting.
+    """Select and order verified master-resume content for a specific posting.
 
-    The PROFESSIONAL SUMMARY is intentionally left as-authored: it's a general
-    overview of who the candidate is, while PROJECTS (and skill ordering) are
-    where per-posting tailoring happens.
+    Only ordering and selection change - bullets inside each entry are ranked by how
+    well they evidence what the posting asks for, the most relevant projects are
+    chosen, and skill groups are reordered. No text is rewritten or added. If you
+    keep ``summary_variants.json``, one of *your own* summaries is chosen by role
+    family; otherwise the PROFESSIONAL SUMMARY stays exactly as authored.
     """
-    resume_text = build_master_resume(language)
-    target = f"{job_title}\n{job_description}".strip()
-    if target:
-        resume_text = _apply_skill_reordering(resume_text, target)
-        resume_text = _tailor_projects(resume_text, job_title, job_description)
-    return resume_text
+    return tailor_resume_text(
+        build_master_resume(language), job_title, job_description, language
+    )
 
 
 def _resume_blocks(resume_text: str) -> list[tuple[str, object]]:
@@ -719,111 +606,51 @@ def export_resume_files(
     return result
 
 
-def _job_requirement_summary(job_description: str) -> str:
-    """Extract a short, presentation-safe set of role requirements."""
-    plain_text = re.sub(r"<[^>]+>", " ", job_description or "")
-    plain_text = re.sub(r"[*_`#]+", " ", plain_text)
-    plain_text = re.sub(r"\s+", " ", plain_text).lower()
-    terms = [
-        ("python", "Python"),
-        ("automation", "automation"),
-        ("machine learning", "machine learning"),
-        ("pytorch", "PyTorch"),
-        ("scikit-learn", "scikit-learn"),
-        ("pandas", "pandas"),
-        ("numpy", "NumPy"),
-        ("data pipeline", "data pipelines"),
-        ("pytest", "pytest"),
-        ("ci/cd", "CI/CD"),
-        ("docker", "Docker"),
-        ("sql", "SQL"),
-        ("git", "Git"),
-        ("apis", "APIs"),
-        ("cloud", "cloud"),
-        ("javascript", "JavaScript"),
-        ("excel", "Excel"),
-        ("business analysis", "business analysis"),
-        ("requirements gathering", "requirements gathering"),
-    ]
-    matches = [(plain_text.index(term), label) for term, label in terms if term in plain_text]
-    if not matches:
-        return ""
-    return ", ".join(label for _, label in sorted(matches)[:3])
-
-
-def _verified_resume_summary(language: str) -> str:
-    suffix = _language_suffix(language)
-    resume_path = Path(__file__).parent / f"master_resume{suffix}.txt"
-    if not resume_path.exists():
-        return ""
-
-    lines = resume_path.read_text(encoding="utf-8").splitlines()
-    summary_headers = SUMMARY_SECTION_HEADERS
-    in_summary = False
-    summary_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped in summary_headers:
-            in_summary = True
-            continue
-        if in_summary and stripped in SECTION_HEADERS:
-            break
-        if in_summary and stripped:
-            summary_lines.append(stripped)
-    return " ".join(summary_lines)
-
-
-def generate_cover_letter(job_title: str, company_name: str, job_description: str = "") -> str:
-    profile = USER_PROFILE["name"]
-    location = USER_PROFILE["location"]
-    title = job_title or "Software Engineer"
-    company = company_name or "Hiring Company"
-    requirements = _job_requirement_summary(job_description)
-    resume_summary = _verified_resume_summary("en")
-    evidence = (
-        f"My professional summary is: {resume_summary} "
-        if resume_summary
-        else "I have included my resume for your review. "
+def _letter_for(
+    job_title: str,
+    company_name: str,
+    job_description: str,
+    language: str,
+    company_hook: str = "",
+    mention_gaps: bool = True,
+) -> str:
+    return build_cover_letter(
+        job_title,
+        company_name,
+        job_description,
+        strip_tags_from_text(build_master_resume(language)),
+        language=language,
+        user_name=USER_PROFILE["name"],
+        user_location=USER_PROFILE["location"],
+        company_hook=company_hook,
+        mention_gaps=mention_gaps,
     )
-    description_note = (
-        f" The posting highlights {requirements}; I would welcome a discussion about the role's priorities."
-        if requirements
-        else ""
-    )
-    return (
-        f"Dear Hiring Manager at {company},\n\n"
-        f"I am writing to express my interest in the {title} opportunity at {company}. "
-        f"{evidence}{description_note}\n\n"
-        "I look forward to the opportunity to discuss how my background aligns with your needs.\n\n"
-        f"Sincerely,\n{profile}\n{location}"
-    )
+
+
+def generate_cover_letter(
+    job_title: str,
+    company_name: str,
+    job_description: str = "",
+    company_hook: str = "",
+    mention_gaps: bool = True,
+) -> str:
+    """English cover letter built only from master-resume bullets that match the posting.
+
+    ``company_hook`` is an optional sentence *you* write about why this company; it is
+    inserted verbatim. Nothing company-specific is ever generated for you.
+    """
+    return _letter_for(job_title, company_name, job_description, "en", company_hook, mention_gaps)
 
 
 def generate_cover_letter_french(
-    job_title: str, company_name: str, job_description: str = ""
+    job_title: str,
+    company_name: str,
+    job_description: str = "",
+    company_hook: str = "",
+    mention_gaps: bool = True,
 ) -> str:
-    """Generate a concise French cover letter using the user's verified background."""
-    title = job_title or "poste recherché"
-    company = company_name or "votre organisation"
-    requirements = _job_requirement_summary(job_description)
-    resume_summary = _verified_resume_summary("fr")
-    evidence = (
-        f"Mon profil professionnel est le suivant : {resume_summary} "
-        if resume_summary
-        else "Vous trouverez mon curriculum vitæ en pièce jointe. "
-    )
-    description_note = (
-        f" L'offre met l'accent sur {requirements}; je serais heureux d'échanger sur les priorités du poste."
-        if requirements
-        else ""
-    )
-    return (
-        f"Madame, Monsieur,\n\n"
-        f"Je vous soumets ma candidature au poste de {title} chez {company}. "
-        f"{evidence}{description_note}\n\n"
-        "Je serais heureux de discuter de la façon dont mon parcours répond aux besoins de ce poste.\n\n"
-        f"Cordialement,\n{USER_PROFILE['name']}\n{USER_PROFILE['location']}"
-    )
+    """French cover letter built only from master-resume bullets that match the posting."""
+    return _letter_for(job_title, company_name, job_description, "fr", company_hook, mention_gaps)
 
 
 def export_cover_letter(
@@ -832,6 +659,7 @@ def export_cover_letter(
     job_description: str = "",
     output_dir: str | Path | None = None,
     language: str = "en",
+    company_hook: str = "",
 ) -> str:
     target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -842,9 +670,9 @@ def export_cover_letter(
     _configure_docx(document)
 
     letter = (
-        generate_cover_letter_french(job_title, company_name, job_description)
+        generate_cover_letter_french(job_title, company_name, job_description, company_hook)
         if language == "fr"
-        else generate_cover_letter(job_title, company_name, job_description)
+        else generate_cover_letter(job_title, company_name, job_description, company_hook)
     )
     for text in letter.split("\n\n"):
         paragraph = document.add_paragraph(text)
@@ -855,88 +683,160 @@ def export_cover_letter(
     return str(file_path)
 
 
+def suggest_languages(job: dict) -> tuple[str, ...]:
+    """Document languages worth generating for a posting.
+
+    A French posting gets French documents, an English one English; bilingual or
+    ambiguous postings get both. Saves review time and avoids sending the wrong language.
+    """
+    text = f"{job.get('title', '')}. {job.get('description', '')}"
+    language = detect_language(text)
+    if mentions_bilingual(text) or language == "unknown":
+        return ("en", "fr")
+    return (language,)
+
+
+def _pack_file_names(company_slug: str, language: str) -> dict[str, str]:
+    suffix = _language_suffix(language)
+    return {
+        f"{language}_resume_pdf": f"resume_{company_slug}{suffix}.pdf",
+        f"{language}_resume_docx": f"resume_{company_slug}{suffix}.docx",
+        f"{language}_cover_letter_docx": f"cover_letter_{company_slug}{suffix}.docx",
+    }
+
+
 def generate_application_pack(
     job: dict,
     output_dir: str | Path | None = None,
+    languages: tuple[str, ...] | list[str] | None = None,
+    company_hook: str | None = None,
 ) -> dict[str, str]:
-    """
-    Explicitly generate tailored resume (PDF, DOCX) and cover letter (DOCX) files
-    for both English and French for a specific job when requested.
+    """Generate tailored resume (PDF, DOCX) and cover letter (DOCX) files for a posting.
+
+    ``languages`` defaults to both English and French; pass ``suggest_languages(job)``
+    to generate only what the posting calls for. ``company_hook`` is an optional
+    company-specific sentence you wrote (it can also come from ``job["company_hook"]``).
+
+    The returned dict maps names to file paths. Every generated document is also
+    checked against the master resume: anything that is not a reordering of your own
+    content (or a number/skill in a letter found in neither resume nor posting) is
+    written to ``verification_report.txt`` in the pack folder, and the dict gains a
+    ``verification_report`` key pointing to it (read it with
+    ``read_verification_warnings``). No such key means the pack verified clean.
     """
     job_title = job.get("title", "Software Engineer")
     company_name = job.get("company", "Company")
     description = job.get("description", "")
+    hook = company_hook if company_hook is not None else str(job.get("company_hook") or "")
+    wanted = tuple(languages) if languages else ("en", "fr")
     pack_dir = _application_pack_directory(job, output_dir)
 
-    # Export English resume & cover letter
-    en_files = export_resume_files(
-        job_title,
-        company_name,
-        formats=["docx", "pdf"],
-        output_dir=pack_dir,
-        language="en",
-        job_description=description,
-    )
-    en_cover = export_cover_letter(
-        job_title, company_name, job_description=description, output_dir=pack_dir, language="en"
-    )
-
-    # Export French resume & cover letter
-    fr_files = export_resume_files(
-        job_title,
-        company_name,
-        formats=["docx", "pdf"],
-        output_dir=pack_dir,
-        language="fr",
-        job_description=description,
-    )
-    fr_cover = export_cover_letter(
-        job_title, company_name, job_description=description, output_dir=pack_dir, language="fr"
-    )
-
-    return {
-        "en_resume_docx": en_files.get("docx", ""),
-        "en_resume_pdf": en_files.get("pdf", ""),
-        "en_cover_letter_docx": en_cover,
-        "fr_resume_docx": fr_files.get("docx", ""),
-        "fr_resume_pdf": fr_files.get("pdf", ""),
-        "fr_cover_letter_docx": fr_cover,
+    result: dict[str, str] = {
+        f"{lang}_{kind}": ""
+        for lang in ("en", "fr")
+        for kind in ("resume_docx", "resume_pdf", "cover_letter_docx")
     }
+    warnings_found: list[str] = []
+    for language in wanted:
+        files = export_resume_files(
+            job_title,
+            company_name,
+            formats=["docx", "pdf"],
+            output_dir=pack_dir,
+            language=language,
+            job_description=description,
+        )
+        cover = export_cover_letter(
+            job_title,
+            company_name,
+            job_description=description,
+            output_dir=pack_dir,
+            language=language,
+            company_hook=hook,
+        )
+        result[f"{language}_resume_docx"] = files.get("docx", "")
+        result[f"{language}_resume_pdf"] = files.get("pdf", "")
+        result[f"{language}_cover_letter_docx"] = cover
+
+        master = build_master_resume(language)
+        tailored = tailor_resume_for_job(job_title, company_name, language, description)
+        # Summary variants are user-authored; anything else off-master is flagged.
+        from_variants = _summary_variant_lines(language)
+        for issue in verify_resume(tailored, master, allowed_extra_lines=from_variants):
+            warnings_found.append(f"[{language}] {issue}")
+        letter_text = _letter_for(job_title, company_name, description, language, hook)
+        for issue in verify_letter(
+            letter_text,
+            strip_tags_from_text(master),
+            f"{job_title}\n{description}",
+            allowed_text=[company_name, hook, USER_PROFILE["name"], USER_PROFILE["location"]],
+        ):
+            warnings_found.append(f"[{language}] {issue}")
+
+    report = pack_dir / "verification_report.txt"
+    if warnings_found:
+        report.write_text(
+            "Items to review before sending (generated text that is not directly from your "
+            "master resume or the posting):\n" + "\n".join(f"- {w}" for w in warnings_found),
+            encoding="utf-8",
+        )
+        result["verification_report"] = str(report)
+    elif report.exists():
+        report.unlink()
+    return result
+
+
+def read_verification_warnings(report_path: str | Path | None) -> list[str]:
+    """Warnings listed in a pack's ``verification_report.txt`` (empty list if none)."""
+    if not report_path:
+        return []
+    path = Path(report_path)
+    if not path.exists():
+        return []
+    return [
+        line[2:].strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("- ")
+    ]
+
+
+def _summary_variant_lines(language: str) -> list[str]:
+    try:
+        from jobhunter.resume.tailoring import load_summary_variants
+    except ModuleNotFoundError:  # pragma: no cover
+        from resume.tailoring import load_summary_variants
+    return list(load_summary_variants(language).values())
 
 
 def get_application_pack_files(
     job: dict,
     output_dir: str | Path | None = None,
+    languages: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, str | bool]:
     """
     Inspect which resume and cover letter files exist on disk for a job. Does NOT
     generate files. `exists` means at least one file is available; `complete`
-    means every expected file was generated.
+    means every expected file (for ``languages``, default both) was generated.
     """
     target_dir = _application_pack_directory(job, output_dir)
     company_slug = _filename_component(str(job.get("company") or ""))
+    wanted = tuple(languages) if languages else ("en", "fr")
 
-    en_pdf = target_dir / f"resume_{company_slug}.pdf"
-    en_docx = target_dir / f"resume_{company_slug}.docx"
-    en_cover = target_dir / f"cover_letter_{company_slug}.docx"
-    fr_pdf = target_dir / f"resume_{company_slug}_fr.pdf"
-    fr_docx = target_dir / f"resume_{company_slug}_fr.docx"
-    fr_cover = target_dir / f"cover_letter_{company_slug}_fr.docx"
+    paths: dict[str, Path] = {}
+    for language in ("en", "fr"):
+        for key, name in _pack_file_names(company_slug, language).items():
+            paths[key] = target_dir / name
 
-    expected_files = (en_pdf, en_docx, en_cover, fr_pdf, fr_docx, fr_cover)
+    expected_files = [paths[key] for language in wanted for key in _pack_file_names(company_slug, language)]
     complete = all(path.exists() for path in expected_files)
-    exists = any(path.exists() for path in expected_files)
+    exists = any(path.exists() for path in paths.values())
+    report = target_dir / "verification_report.txt"
 
-    return {
-        "exists": exists,
-        "complete": complete,
-        "en_resume_docx": str(en_docx) if en_docx.exists() else "",
-        "en_resume_pdf": str(en_pdf) if en_pdf.exists() else "",
-        "en_cover_letter_docx": str(en_cover) if en_cover.exists() else "",
-        "fr_resume_docx": str(fr_docx) if fr_docx.exists() else "",
-        "fr_resume_pdf": str(fr_pdf) if fr_pdf.exists() else "",
-        "fr_cover_letter_docx": str(fr_cover) if fr_cover.exists() else "",
-    }
+    files: dict[str, str | bool] = {"exists": exists, "complete": complete}
+    for key, path in paths.items():
+        files[key] = str(path) if path.exists() else ""
+    files["verification_report"] = str(report) if report.exists() else ""
+    return files
 
 
 _ATS_STOP_WORDS = {
@@ -957,26 +857,55 @@ def _ats_terms(text: str) -> set[str]:
 
 
 def ats_analysis(resume_text: str, job_description: str) -> dict:
-    """Estimate informative word-token coverage; this is not an ATS prediction."""
+    """Keyword coverage plus an honest skills gap report; not an ATS prediction.
+
+    * ``missing_skills``  - skills the posting names that you *do* have (per your profile
+      keywords) but this resume does not show: safe to add.
+    * ``skill_gaps``      - skills the posting names that you have no record of: do NOT
+      claim them; learn them or address them honestly.
+    """
+    resume_text = strip_tags_from_text(resume_text or "")
     resume_keywords = _ats_terms(resume_text)
     jd_tokens = _ats_terms(job_description)
     missing_keywords = sorted(jd_tokens - resume_keywords)
-    description = (job_description or "").lower()
-    missing_skills = [
-        keyword
-        for keyword in USER_PROFILE["keywords"]
-        if keyword.lower() in description and keyword.lower() not in (resume_text or "").lower()
-    ]
     matched_count = len(jd_tokens & resume_keywords)
     ats_score = round(100 * matched_count / len(jd_tokens)) if jd_tokens else 0
+
+    keywords = tuple(USER_PROFILE.get("keywords", []) or [])
+    matcher = get_matcher(keywords)
+    profile_skills = set(candidate_inventory(keywords, None, matcher)) | expand_inventory(
+        USER_PROFILE.get("resume_skills", []) or []
+    )
+    resume_skills = set(matcher.extract(resume_text))
+    posting_skills = set(analyze_posting("", job_description, matcher).skills)
+    missing_skills = [
+        matcher.label(skill) for skill in sorted(posting_skills & profile_skills - resume_skills)
+    ]
+    skill_gaps = [
+        matcher.label(skill) for skill in sorted(posting_skills - profile_skills - resume_skills)
+    ]
+
+    improvements: list[str] = []
+    if missing_skills:
+        improvements.append(
+            "Show these skills you already have (they are in your profile but not on this resume): "
+            + ", ".join(missing_skills[:6])
+            + "."
+        )
+    if skill_gaps:
+        improvements.append(
+            "The posting also names skills you have no record of - do not claim them: "
+            + ", ".join(skill_gaps[:6])
+            + ". Consider learning the ones that recur across your target roles."
+        )
+    if not improvements:
+        improvements.append("Your resume already covers the skills this posting names.")
+
     return {
         "ats_score": ats_score,
         "score_type": "keyword coverage estimate",
         "missing_keywords": missing_keywords[:15],
         "missing_skills": missing_skills[:10],
-        "improvements": [
-            "Add role-specific keywords from the job description.",
-            "Highlight your Python, automation, and machine learning project experience.",
-            "Emphasize PyTorch, scikit-learn, SQL, and automation scripting skills where relevant.",
-        ],
+        "skill_gaps": skill_gaps[:10],
+        "improvements": improvements,
     }

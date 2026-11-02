@@ -24,44 +24,49 @@ try:
     from jobhunter.config.settings import (
         BASE_DIR,
         JOB_SEARCH_URLS,
+        MAX_PERSISTED_JOBS,
         OUTPUT_DIR,
     )
     from jobhunter.daily_report import generate_daily_report
     from jobhunter.filter import filter_jobs
     from jobhunter.scoring.engine import score_jobs
+    from jobhunter.scoring.feedback import FeedbackModel
     from jobhunter.scraper.collector import (
-        ArbeitnowScraper,
         BaseScraper,
-        JobicyScraper,
-        JobSpyScraper,
-        RemotiveScraper,
         canonical_job_url,
         collect_jobs_from_urls,
     )
+    from jobhunter.scraper.dedupe import dedupe_jobs
+    from jobhunter.scraper.enrich import enrich_descriptions
+    from jobhunter.scraper.sources import build_default_scrapers
     from jobhunter.tracker.db import (
         ensure_database,
         filter_applied_jobs,
+        get_feedback_examples,
+        purge_nonlocal_jobs,
         purge_placeholder_jobs,
         purge_red_flag_jobs,
         save_jobs,
     )
 except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import BASE_DIR, JOB_SEARCH_URLS, OUTPUT_DIR
+    from config.settings import BASE_DIR, JOB_SEARCH_URLS, MAX_PERSISTED_JOBS, OUTPUT_DIR
     from daily_report import generate_daily_report
     from filter import filter_jobs
     from scoring.engine import score_jobs
+    from scoring.feedback import FeedbackModel
     from scraper.collector import (
-        ArbeitnowScraper,
         BaseScraper,
-        JobicyScraper,
-        JobSpyScraper,
-        RemotiveScraper,
         canonical_job_url,
         collect_jobs_from_urls,
     )
+    from scraper.dedupe import dedupe_jobs
+    from scraper.enrich import enrich_descriptions
+    from scraper.sources import build_default_scrapers
     from tracker.db import (
         ensure_database,
         filter_applied_jobs,
+        get_feedback_examples,
+        purge_nonlocal_jobs,
         purge_placeholder_jobs,
         purge_red_flag_jobs,
         save_jobs,
@@ -79,6 +84,7 @@ class CollectionDependencies:
 
     ensure_database: Callable[[], Any] = ensure_database
     purge_placeholder_jobs: Callable[[], Any] = purge_placeholder_jobs
+    purge_nonlocal_jobs: Callable[[], Any] = purge_nonlocal_jobs
     purge_red_flag_jobs: Callable[[], Any] = purge_red_flag_jobs
     filter_applied_jobs: Callable[[Iterable[dict[str, Any]]], list[dict[str, Any]]] = (
         filter_applied_jobs
@@ -101,22 +107,25 @@ class ExtractionStage(IPipelineStage):
     def __init__(
         self, scrapers: list[BaseScraper] | None = None, fallback_urls: list[str] | None = None
     ):
-        self.scrapers = scrapers or [
-            JobSpyScraper(),
-            JobicyScraper(),
-            RemotiveScraper(),
-            ArbeitnowScraper(),
-        ]
+        # Every configured source: aggregators for breadth, employer ATS boards and
+        # career pages for fresher first-party postings (see scraper/sources.py).
+        self.scrapers = scrapers or build_default_scrapers()
         self.fallback_urls = fallback_urls or JOB_SEARCH_URLS
 
     def process(self, context: dict[str, Any]) -> dict[str, Any]:
         jobs: list[dict[str, Any]] = []
+        source_counts: dict[str, int] = {}
         for scraper in self.scrapers:
+            name = scraper.__class__.__name__
             try:
                 scraped = scraper.scrape()
                 jobs.extend(scraped)
+                source_counts[name] = len(scraped)
+                LOGGER.info("%s returned %s postings.", name, len(scraped))
             except Exception:
-                LOGGER.exception("Scraper %s failed during collection.", scraper.__class__.__name__)
+                source_counts[name] = 0
+                LOGGER.exception("Scraper %s failed during collection.", name)
+        context["source_counts"] = source_counts
 
         if not jobs:
             try:
@@ -129,7 +138,14 @@ class ExtractionStage(IPipelineStage):
             url = str(job.get("url") or "").strip()
             if url:
                 deduped_by_url[canonical_job_url(url)] = job
-        deduped = list(deduped_by_url.values())
+        # Same role listed on several boards: keep the employer's own copy, longest text.
+        deduped = dedupe_jobs(deduped_by_url.values())
+        # Aggregator snippets hide skills/years; fetch fuller text for plausible local roles.
+        try:
+            enriched = enrich_descriptions(deduped)
+            context["enriched_descriptions"] = enriched
+        except Exception:
+            LOGGER.exception("Description enrichment failed; scoring with available text.")
         context["raw_jobs"] = deduped
         return context
 
@@ -137,9 +153,25 @@ class ExtractionStage(IPipelineStage):
 class ScoringStage(IPipelineStage):
     """Scores candidate jobs based on profile alignment."""
 
+    def __init__(self, feedback: FeedbackModel | None = None, use_feedback: bool = True):
+        self.feedback = feedback
+        self.use_feedback = use_feedback
+
+    def _feedback_model(self) -> FeedbackModel | None:
+        """Preference model from what you applied to vs dismissed (inactive until enough data)."""
+        if self.feedback is not None or not self.use_feedback:
+            return self.feedback
+        try:
+            liked, disliked = get_feedback_examples()
+            model = FeedbackModel(liked, disliked)
+            return model if model.active else None
+        except Exception:
+            LOGGER.debug("Preference feedback unavailable; scoring without it.", exc_info=True)
+            return None
+
     def process(self, context: dict[str, Any]) -> dict[str, Any]:
         raw_jobs = context.get("raw_jobs", [])
-        context["scored_jobs"] = score_jobs(raw_jobs)
+        context["scored_jobs"] = score_jobs(raw_jobs, feedback=self._feedback_model())
         return context
 
 
@@ -156,9 +188,9 @@ class PersistenceStage(IPipelineStage):
     """Persists top filtered jobs to database repository and exports JSON."""
 
     def __init__(
-        self, limit: int = 25, dependencies: CollectionDependencies | None = None
+        self, limit: int | None = None, dependencies: CollectionDependencies | None = None
     ):
-        self.limit = limit
+        self.limit = limit if limit is not None else MAX_PERSISTED_JOBS
         self.dependencies = dependencies
 
     def process(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +250,7 @@ class JobCollectionPipeline:
         with self._run_lock:
             self.dependencies.ensure_database()
             self.dependencies.purge_placeholder_jobs()
+            self.dependencies.purge_nonlocal_jobs()
             self.dependencies.purge_red_flag_jobs()
             context: dict[str, Any] = {}
             for stage in self.stages:

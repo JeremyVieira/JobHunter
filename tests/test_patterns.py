@@ -89,6 +89,7 @@ def test_scoring_strategy_and_composite():
     profile = UserProfile(
         target_roles=["Business Analyst"],
         keywords=["sql", "excel", "jira"],
+        experience_years=1,
     )
     config = ScoringRulesConfig()
     scorer = CompositeScorer(config=config, profile=profile)
@@ -105,7 +106,7 @@ def test_scoring_strategy_and_composite():
     scores = scorer.score_job(job)
     assert scores["fit_score"] >= 70
     assert scores["title_match"] == 100
-    assert scores["experience_match"] == 90
+    assert scores["experience_match"] == 95  # 2 yrs asked, 1 yr + 1 stretch
     assert scores["skills_match"] >= 50
 
 

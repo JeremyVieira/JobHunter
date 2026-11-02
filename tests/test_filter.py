@@ -1,4 +1,4 @@
-from jobhunter.filter import filter_jobs
+from jobhunter.filter import filter_jobs, is_montreal_area_or_remote
 
 
 def test_filter_jobs_rejects_staffing_agency_by_name():
@@ -170,7 +170,7 @@ def test_filter_jobs_accepts_remote_roles():
     assert len(filtered) == 1
 
 
-def test_filter_jobs_accepts_remote_outside_region_but_rejects_hybrid_outside_region():
+def test_filter_jobs_rejects_remote_and_hybrid_roles_outside_montreal_area():
     jobs = [
         {
             "title": "Business Analyst",
@@ -192,7 +192,28 @@ def test_filter_jobs_accepts_remote_outside_region_but_rejects_hybrid_outside_re
 
     filtered = filter_jobs(jobs)
 
-    assert [job["company"] for job in filtered] == ["Remote Co"]
+    assert filtered == []
+
+
+def test_filter_jobs_rejects_seattle_even_when_description_mentions_remote():
+    jobs = [
+        {
+            "title": "Cloud Engineer",
+            "company": "Example Corp",
+            "fit_score": 80,
+            "location": "Seattle, WA",
+            "remote_status": "Hybrid",
+            "description": "Remote work may be available for this Seattle-based team.",
+        }
+    ]
+
+    assert filter_jobs(jobs) == []
+
+
+def test_montreal_area_location_helper_rejects_seattle():
+    assert is_montreal_area_or_remote("Montreal, QC") is True
+    assert is_montreal_area_or_remote("Laval, QC") is True
+    assert is_montreal_area_or_remote("Seattle, WA") is False
 
 
 def test_filter_jobs_accepts_accented_montreal_and_qc_abbreviation():

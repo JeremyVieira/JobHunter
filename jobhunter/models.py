@@ -32,6 +32,9 @@ class JobListing:
     growth_potential: float | None = None
     salary_potential: float | None = None
 
+    # JSON-serializable explanation of the score (matched/missing skills, bonuses)
+    match_details: dict[str, Any] | str | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -86,6 +89,10 @@ class UserProfile:
     target_roles: list[str] = field(default_factory=list)
     priority_target_roles: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
+    # Skill ids found in the local master resume (see jobhunter.matching.inventory)
+    resume_skills: list[str] = field(default_factory=list)
+    # Languages the candidate works in, e.g. ["en", "fr"]
+    languages: list[str] = field(default_factory=lambda: ["en"])
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -99,16 +106,22 @@ class UserProfile:
 
 @dataclass
 class ScoringRulesConfig:
-    """Configurable weights and penalties for the scoring engine."""
+    """Configurable weights and penalties for the scoring engine.
 
-    title_match_weight: float = 30.0
-    experience_match_weight: float = 15.0
-    education_match_weight: float = 7.0
-    skills_match_weight: float = 22.0
-    salary_estimate_weight: float = 8.0
-    remote_preference_weight: float = 6.0
+    Weights are relative (the engine normalizes by their sum). Dimensions that
+    barely vary between postings (education, salary, remote, proximity, commute)
+    carry small weights so title, experience and requirement coverage - the
+    signals that actually separate good and bad matches - drive the ranking.
+    """
+
+    title_match_weight: float = 24.0
+    experience_match_weight: float = 14.0
+    education_match_weight: float = 3.0
+    skills_match_weight: float = 30.0
+    salary_estimate_weight: float = 4.0
+    remote_preference_weight: float = 3.0
     montreal_proximity_weight: float = 8.0
-    commute_preference_weight: float = 4.0
+    commute_preference_weight: float = 2.0
     startup_penalty: float = 15.0
     senior_developer_penalty: float = 10.0
     seven_years_penalty: float = 15.0
@@ -118,6 +131,13 @@ class ScoringRulesConfig:
     entry_level_bonus: float = 8.0
     culture_bonus: float = 6.0
     established_bonus: float = 6.0
+    # New in the matching upgrade
+    core_gap_penalty: float = 8.0  # per missing hard-stack skill (Java, C#, ...)
+    core_gap_penalty_cap: float = 20.0
+    bilingual_bonus: float = 4.0
+    language_mismatch_penalty: float = 15.0
+    freshness_bonus: float = 3.0
+    stale_penalty: float = 3.0
     entry_level_min_fit_score: float = 55.0
     max_score: float = 100.0
 
@@ -144,6 +164,10 @@ class ApplicationRecord:
     status: str = "saved"
     interview_date: str | None = None
     notes: str = ""
+    url: str = ""
+    source: str = ""
+    language: str = ""
+    response_date: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

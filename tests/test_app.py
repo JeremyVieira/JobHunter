@@ -53,6 +53,8 @@ def mock_scrapers(monkeypatch, tmp_path):
     monkeypatch.setattr("jobhunter.scraper.collector.JobicyScraper.scrape", lambda self: [])
     monkeypatch.setattr("jobhunter.scraper.collector.RemotiveScraper.scrape", lambda self: [])
     monkeypatch.setattr("jobhunter.scraper.collector.ArbeitnowScraper.scrape", lambda self: [])
+    monkeypatch.setattr("jobhunter.scraper.boards.TheMuseScraper.scrape", lambda self: [])
+    monkeypatch.setattr("jobhunter.scraper.enrich.enrich_descriptions", lambda jobs, **kw: 0)
     monkeypatch.setattr("jobhunter.app.collect_jobs_from_urls", lambda urls: sample_jobs)
 
 
@@ -198,6 +200,18 @@ def test_start_dashboard_uses_local_streamlit_server(monkeypatch):
     assert captured["command"][1:3] == ["-m", "streamlit"]
     assert "--server.address" in captured["command"]
     assert captured["command"][captured["command"].index("--server.address") + 1] == "127.0.0.1"
+
+
+def test_dashboard_download_helper_ignores_missing_paths_and_directories(tmp_path):
+    from jobhunter.dashboard.app import _read_download_file
+
+    document = tmp_path / "resume.pdf"
+    document.write_bytes(b"pdf")
+
+    assert _read_download_file("") is None
+    assert _read_download_file(None) is None
+    assert _read_download_file(tmp_path) is None
+    assert _read_download_file(document) == (document, b"pdf")
 
 
 def test_main_collects_before_starting_dashboard_and_scheduler(monkeypatch):

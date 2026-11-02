@@ -47,6 +47,7 @@ data/
 # Sensitive Resume & Contact Data (Master Resumes)
 jobhunter/resume/master_resume.txt
 jobhunter/resume/master_resume_fr.txt
+jobhunter/resume/summary_variants.json
 jobhunter/resume/*.private.*
 jobhunter/resume/*.secret.*
 

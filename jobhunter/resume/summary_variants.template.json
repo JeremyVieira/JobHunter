@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to summary_variants.json (git-ignored) and write your OWN summaries. Only facts that are true and already on your master resume. Keys: software, data_ml, devops_cloud, analyst, support, default. Any key you omit falls back to 'default', then to the summary in master_resume.txt. Keys starting with _ are ignored.",
+  "en": {
+    "software": "Software engineering graduate who builds and tests Python/web applications ... (use only facts from your master resume)",
+    "data_ml": "Software engineering graduate with hands-on machine-learning project experience ... (use only facts from your master resume)",
+    "analyst": "Software engineering graduate with IT support and requirements-gathering experience ... (use only facts from your master resume)",
+    "support": "IT support analyst with ... (use only facts from your master resume)",
+    "default": "Your general summary ..."
+  },
+  "fr": {
+    "software": "Diplômé(e) en génie logiciel ... (uniquement des faits de votre CV maître)",
+    "default": "Votre résumé général ..."
+  }
+}

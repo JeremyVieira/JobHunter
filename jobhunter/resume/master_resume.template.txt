@@ -5,7 +5,7 @@ candidate@example.com
 https://github.com/username
 
 PROFESSIONAL SUMMARY
-Software Engineering graduate with practical IT support and technical analysis experience. Demonstrated strengths in systems troubleshooting, requirements elicitation, workflow optimization, and cross-functional collaboration. Bilingual (French/English fluent) with a strong foundation in database modeling, API architecture, and analytical problem-solving.
+Software Engineering graduate with practical IT support and technical analysis experience. Strong in systems troubleshooting, requirements gathering, workflow improvement, and cross-functional collaboration. Bilingual in French and English.
 
 EXPERIENCE
 
@@ -15,7 +15,7 @@ April 2024 - Current
 - Conducted root-cause analysis on critical system incidents, coordinating with technical teams to minimize operational disruption
 - Provided emergency on-site technical support and hardware/software diagnostics whenever needed
 - Collaborated with cross-functional team members across Canada to align support processes and systems
-- Authored comprehensive technical documentation and standardized troubleshooting guides for the internal knowledge base
+- Authored comprehensive technical documentation and standardized troubleshooting guides for the internal knowledge base [tags: documentation, knowledge base]
 
 Company B, Montreal — IT Help Desk
 January 2024 - April 2024

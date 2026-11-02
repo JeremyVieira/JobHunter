@@ -5,6 +5,7 @@ import logging
 import requests
 
 from jobhunter.scraper.collector import (
+    CompanyCareerPageScraper,
     JobSpyScraper,
     RemotiveScraper,
     build_example_jobs,
@@ -44,16 +45,17 @@ def test_normalize_job_with_missing_fields():
     normalized = normalize_job(job)
     assert normalized["title"] == "Business Analyst"
     assert normalized["company"] == "Unknown"
-    assert normalized["location"] == "Montreal, QC"
+    # a missing location is never silently read as Montreal (or Remote)
+    assert normalized["location"] == "Unknown"
     assert normalized["salary"] == "Not disclosed"
     assert normalized["source"] == "manual"
 
 
 def test_normalize_job_truncates_long_description():
-    long_description = "A" * 5000
+    long_description = "A" * 15000
     job = {"title": "Analyst", "description": long_description}
     normalized = normalize_job(job)
-    assert len(normalized["description"]) <= 4000
+    assert len(normalized["description"]) <= 12000
 
 
 def test_build_example_jobs():
@@ -103,6 +105,63 @@ def test_collect_jobs_from_urls_with_empty_list():
 def test_collect_jobs_from_urls_with_none_urls():
     jobs = collect_jobs_from_urls([None, "", None])
     assert len(jobs) == 0
+
+
+def test_company_career_page_scraper_parses_jobposting_jsonld():
+    html = """
+    <html><head><script type="application/ld+json">
+    {"@type":"JobPosting","title":"Cloud Engineer",
+     "datePosted":"2026-10-01","url":"https://example.com/jobs/cloud",
+     "jobLocation":{"address":{"addressLocality":"Montreal","addressRegion":"QC"}},
+     "description":"Build cloud infrastructure with Terraform and Python."}
+    </script></head></html>
+    """
+    jobs = CompanyCareerPageScraper._parse_page(
+        html, "Example Bank", "https://example.com/careers"
+    )
+    assert jobs[0]["title"] == "Cloud Engineer"
+    assert jobs[0]["company"] == "Example Bank"
+    assert jobs[0]["location"] == "Montreal, QC"
+    assert jobs[0]["source"] == "company-career-page"
+
+
+def test_company_career_page_configuration_supports_named_watchlist_entries(monkeypatch):
+    monkeypatch.setattr(
+        "jobhunter.scraper.collector.COMPANY_CAREER_URLS",
+        ["CMLS Financial|https://www.cmls.ca/careers"],
+    )
+    scraper = CompanyCareerPageScraper()
+    assert scraper.pages == [("CMLS Financial", "https://www.cmls.ca/careers")]
+
+
+def test_company_career_page_configuration_skips_invalid_urls(monkeypatch, caplog):
+    monkeypatch.setattr(
+        "jobhunter.scraper.collector.COMPANY_CAREER_URLS",
+        ["CAE|https://www.cae_.com/careers/", "Valid|https://example.com/careers"],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scraper = CompanyCareerPageScraper()
+
+    assert scraper.pages == [("Valid", "https://example.com/careers")]
+    assert "Skipping invalid career page URL for CAE" in caplog.text
+
+
+def test_company_career_page_scraper_skips_invalid_direct_page_url(monkeypatch, caplog):
+    requested = []
+    monkeypatch.setattr(
+        "jobhunter.scraper.collector._request_get",
+        lambda url, **kwargs: requested.append(url),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        jobs = CompanyCareerPageScraper(
+            pages=[("CAE", "https://www.cae_.com/careers/")]
+        ).scrape()
+
+    assert jobs == []
+    assert requested == []
+    assert "Skipping invalid career page URL for CAE" in caplog.text
 
 
 def test_fetch_jobicy_jobs_normalizes_real_api_fields(monkeypatch):
