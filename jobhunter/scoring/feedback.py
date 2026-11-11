@@ -12,10 +12,7 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-try:
-    from jobhunter.textutils import normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from textutils import normalize_text
+from jobhunter.textutils import normalize_text
 
 _STOP = frozenset(
     "a an the and or of for to in at with junior senior jr sr i ii iii montreal quebec "

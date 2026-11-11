@@ -7,6 +7,8 @@ def _no_request_delay(monkeypatch):
     from jobhunter.scraper import collector
 
     monkeypatch.setattr(collector, "REQUEST_DELAY_SECONDS", 0.0)
+    # Retry backoff would also stall tests; never actually sleep.
+    monkeypatch.setattr(collector.time, "sleep", lambda delay: None)
 
 
 @pytest.fixture(scope="session", autouse=True)

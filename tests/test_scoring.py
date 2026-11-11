@@ -28,13 +28,19 @@ def test_parse_salary():
     assert parse_salary("95K") == 95000.0
     assert parse_salary("$80K - $100K") == 90000.0
     assert parse_salary("CAD 72.5k to 85k") == 78750.0
+    assert parse_salary("$95,000 - $115,000 CAD/yr") == 105000.0
+    assert parse_salary("$30 CAD/hr") == 30 * 2080
     assert parse_salary("Not disclosed") == 85000.0
     assert parse_salary("N/A") == 85000.0
     assert parse_salary("") == 85000.0
 
 
 def test_scoring_config_weights_and_score_cap_are_applied():
-    profile = {"target_roles": ["Business Analyst"], "priority_target_roles": ["Business Analyst"], "keywords": ["sql"]}
+    profile = {
+        "target_roles": ["Business Analyst"],
+        "priority_target_roles": ["Business Analyst"],
+        "keywords": ["sql"],
+    }
     job = {
         "title": "Business Analyst",
         "company": "Example Corp",

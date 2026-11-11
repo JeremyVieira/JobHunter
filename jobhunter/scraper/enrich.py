@@ -15,28 +15,18 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-try:
-    from jobhunter.config import settings as _settings
-    from jobhunter.filter import (
-        _title_matches_target,
-        is_montreal_area_or_remote,
-        location_is_unknown,
-    )
-    from jobhunter.scraper.collector import (
-        CompanyCareerPageScraper,
-        _polite_sleep,
-        _request_get,
-        is_excluded_title,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from config import settings as _settings
-    from filter import _title_matches_target, is_montreal_area_or_remote, location_is_unknown
-    from scraper.collector import (
-        CompanyCareerPageScraper,
-        _polite_sleep,
-        _request_get,
-        is_excluded_title,
-    )
+from jobhunter.config import settings as _settings
+from jobhunter.filter import (
+    _title_matches_target,
+    is_montreal_area_or_remote,
+    location_is_unknown,
+)
+from jobhunter.scraper.collector import (
+    CompanyCareerPageScraper,
+    _polite_sleep,
+    _request_get,
+    is_excluded_title,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,13 +56,22 @@ def enrich_descriptions(
     fetcher: Callable[..., Any] | None = None,
 ) -> int:
     """Replace short descriptions in-place with fuller JobPosting text. Returns #enriched."""
-    limit = max_fetches if max_fetches is not None else int(getattr(_settings, "ENRICH_MAX_FETCHES", 40))
+    limit = (
+        max_fetches
+        if max_fetches is not None
+        else int(getattr(_settings, "ENRICH_MAX_FETCHES", 40))
+    )
     fetch = fetcher or _request_get
     fetched = enriched = 0
     for job in jobs:
         description = str(job.get("description") or "")
         url = str(job.get("url") or "")
-        if len(description) >= min_length or not url or _host_blocked(url) or not worth_enriching(job):
+        if (
+            len(description) >= min_length
+            or not url
+            or _host_blocked(url)
+            or not worth_enriching(job)
+        ):
             continue
         if fetched >= limit:
             break

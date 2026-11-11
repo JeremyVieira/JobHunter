@@ -23,36 +23,20 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate
 
-try:
-    from jobhunter.config.settings import OUTPUT_DIR, USER_PROFILE
-    from jobhunter.matching.requirements import analyze_posting, candidate_inventory
-    from jobhunter.matching.skills import expand_inventory, get_matcher
-    from jobhunter.resume.letter import build_cover_letter
-    from jobhunter.resume.tailoring import (
-        DATE_LINE_PATTERN,
-        SECTION_HEADERS,
-        strip_tags,
-        strip_tags_from_text,
-        tailor_resume_text,
-    )
-    from jobhunter.resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
-    from jobhunter.resume.verify import verify_letter, verify_resume
-    from jobhunter.textutils import detect_language, mentions_bilingual
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import OUTPUT_DIR, USER_PROFILE
-    from matching.requirements import analyze_posting, candidate_inventory
-    from matching.skills import expand_inventory, get_matcher
-    from resume.letter import build_cover_letter
-    from resume.tailoring import (
-        DATE_LINE_PATTERN,
-        SECTION_HEADERS,
-        strip_tags,
-        strip_tags_from_text,
-        tailor_resume_text,
-    )
-    from resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
-    from resume.verify import verify_letter, verify_resume
-    from textutils import detect_language, mentions_bilingual
+from jobhunter.config.settings import OUTPUT_DIR, RESUME_SOURCE_DIR, USER_PROFILE
+from jobhunter.matching.requirements import analyze_posting, candidate_inventory
+from jobhunter.matching.skills import expand_inventory, get_matcher
+from jobhunter.resume.letter import build_cover_letter
+from jobhunter.resume.tailoring import (
+    DATE_LINE_PATTERN,
+    SECTION_HEADERS,
+    strip_tags,
+    strip_tags_from_text,
+    tailor_resume_text,
+)
+from jobhunter.resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
+from jobhunter.resume.verify import verify_letter, verify_resume
+from jobhunter.textutils import detect_language, mentions_bilingual
 
 # Short factual lines (not prose, not a "Company - Title" heading) that should
 # render as plain text rather than a bold entry heading.
@@ -164,8 +148,7 @@ class IResumeExporter(ABC):
     """Abstract strategy for exporting resume documents in various file formats."""
 
     @abstractmethod
-    def export(self, parsed: ParsedResume, output_path: Path) -> str:
-        pass
+    def export(self, parsed: ParsedResume, output_path: Path) -> str: ...
 
 
 class TxtResumeExporter(IResumeExporter):
@@ -218,7 +201,9 @@ def _add_docx_hyperlink(
     paragraph._p.append(hyperlink)
 
 
-def _add_contact_line_docx(document: Document, contacts: list[str], font_size_pt: float = 9) -> None:
+def _add_contact_line_docx(
+    document: Document, contacts: list[str], font_size_pt: float = 9
+) -> None:
     """Render the contact line, hyperlinking anything that looks like an email
     or a URL while leaving plain text (address, phone) as-is."""
     paragraph = document.add_paragraph()
@@ -367,12 +352,11 @@ def build_master_resume(language: str = "en") -> str:
     out a generic/placeholder resume.
     """
     suffix = _language_suffix(language)
-    resume_dir = Path(__file__).parent
-    master_resume_path = resume_dir / f"master_resume{suffix}.txt"
+    master_resume_path = Path(RESUME_SOURCE_DIR) / f"master_resume{suffix}.txt"
     if master_resume_path.exists():
         return master_resume_path.read_text(encoding="utf-8")
 
-    template_path = resume_dir / f"master_resume{suffix}.template.txt"
+    template_path = Path(__file__).parent / f"master_resume{suffix}.template.txt"
     if template_path.exists():
         warnings.warn(
             f"master_resume{suffix}.txt not found -- falling back to "
@@ -398,9 +382,7 @@ def tailor_resume_for_job(
     keep ``summary_variants.json``, one of *your own* summaries is chosen by role
     family; otherwise the PROFESSIONAL SUMMARY stays exactly as authored.
     """
-    return tailor_resume_text(
-        build_master_resume(language), job_title, job_description, language
-    )
+    return tailor_resume_text(build_master_resume(language), job_title, job_description, language)
 
 
 def _resume_blocks(resume_text: str) -> list[tuple[str, object]]:
@@ -469,7 +451,9 @@ def _register_pdf_fonts() -> None:
 
 def _pdf_styles() -> dict[str, ParagraphStyle]:
     _register_pdf_fonts()
-    font_regular = "ResumeArial" if "ResumeArial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    font_regular = (
+        "ResumeArial" if "ResumeArial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    )
     font_bold = (
         "ResumeArial-Bold"
         if "ResumeArial-Bold" in pdfmetrics.getRegisteredFontNames()
@@ -801,10 +785,8 @@ def read_verification_warnings(report_path: str | Path | None) -> list[str]:
 
 
 def _summary_variant_lines(language: str) -> list[str]:
-    try:
-        from jobhunter.resume.tailoring import load_summary_variants
-    except ModuleNotFoundError:  # pragma: no cover
-        from resume.tailoring import load_summary_variants
+    from jobhunter.resume.tailoring import load_summary_variants
+
     return list(load_summary_variants(language).values())
 
 
@@ -827,7 +809,9 @@ def get_application_pack_files(
         for key, name in _pack_file_names(company_slug, language).items():
             paths[key] = target_dir / name
 
-    expected_files = [paths[key] for language in wanted for key in _pack_file_names(company_slug, language)]
+    expected_files = [
+        paths[key] for language in wanted for key in _pack_file_names(company_slug, language)
+    ]
     complete = all(path.exists() for path in expected_files)
     exists = any(path.exists() for path in paths.values())
     report = target_dir / "verification_report.txt"
@@ -840,10 +824,45 @@ def get_application_pack_files(
 
 
 _ATS_STOP_WORDS = {
-    "about", "after", "also", "and", "are", "as", "at", "be", "been", "but", "by",
-    "can", "candidate", "company", "for", "from", "have", "has", "in", "into", "is",
-    "it", "its", "job", "of", "on", "or", "our", "role", "that", "the", "their",
-    "team", "this", "to", "we", "with", "you", "your",
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "but",
+    "by",
+    "can",
+    "candidate",
+    "company",
+    "for",
+    "from",
+    "have",
+    "has",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "job",
+    "of",
+    "on",
+    "or",
+    "our",
+    "role",
+    "that",
+    "the",
+    "their",
+    "team",
+    "this",
+    "to",
+    "we",
+    "with",
+    "you",
+    "your",
 }
 
 

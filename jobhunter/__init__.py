@@ -1,3 +1,4 @@
-"""JobHunterAI package."""
+"""JobHunter package."""
 
-__all__ = ["app"]
+__version__ = "2.0.0"
+__all__ = ["__version__"]

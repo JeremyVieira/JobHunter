@@ -1,0 +1,63 @@
+Alex Example
+123 Rue Exemple
+Montréal, H0H 0H0
+(514) 555-0100
+alex.example@gmail.com
+https://github.com/alex-example
+
+PROFIL PROFESSIONNEL
+Diplômé bilingue en génie logiciel de l'Université Lakeside avec une expérience pratique touchant le soutien informatique, l'infrastructure infonuagique, le développement Web et mobile, l'automatisation et l'apprentissage automatique. A résolu des incidents techniques et amélioré les processus de soutien dans des rôles de TI en entreprise, mis en place et testé une infrastructure infonuagique avec Google Cloud Platform, Terraform et Pub/Sub dans le cadre d'un projet capstone en partenariat avec une entreprise, et écrit des scripts d'automatisation et des API REST en Python. Collabore efficacement en équipe Agile et possède d'excellentes compétences de communication écrite et orale en français et en anglais.
+
+EXPÉRIENCE
+
+Entreprise Exemple A, Montréal - Analyste soutien informatique
+Avril 2024 - Aujourd'hui
+- Résout des incidents techniques et effectue des analyses de causes racines pour les opérations corporatives au Québec
+- Collabore avec des équipes interfonctionnelles à travers le Canada pour améliorer les processus de support et la documentation
+
+Entreprise Exemple B, Montréal - Analyste soutien informatique
+Janvier 2024 - Avril 2024
+- Résolu des problèmes matériels, logiciels et réseau afin de réduire les temps d'arrêt
+- Recueilli les besoins des utilisateurs et transformé les défis opérationnels en solutions techniques
+
+FORMATION
+
+Université Lakeside, Montréal - Baccalauréat en sciences, génie logiciel
+Septembre 2022 - Juin 2026
+
+Collège Lakeside, Montréal - DEC en informatique et mathématiques
+Août 2020 - Avril 2022
+
+PROJETS
+
+JobHunter — Plateforme de recherche d'emploi et de candidature
+- Développé une plateforme Python qui collecte des offres de plusieurs sources, évalue et filtre les postes, et suit les candidatures dans SQLite
+- Créé un tableau de bord Streamlit et la génération de CV et lettres de présentation en français et en anglais
+- Ajouté des tests automatisés pour la collecte, l'évaluation, le suivi et la génération de documents
+
+Application mobile Campus Guide — Projet d'équipe
+- Contribué à une application React Native et Expo de navigation, avec cartes des campus, itinéraires intérieurs et extérieurs et trajets selon l'horaire
+- Implémenté le suivi GPS et un indicateur de position en temps réel sur la carte
+
+SvelteShipSolutions — Application Web full-stack en équipe
+- Contribué à une application de logistique développée en équipe, avec suivi de colis et calcul automatisé de devis
+- Modélisé des données relationnelles et intégré des API REST tierces avec Prisma ORM et SQL
+
+Détection du cancer colorectal par apprentissage profond
+- Développé un pipeline de classification d'images avec ResNet18, PyTorch et torchvision pour trois types de tissus histologiques colorectaux
+- Utilisé scikit-learn et Google Colab avec accélération GPU
+
+COMPÉTENCES TECHNIQUES
+
+Programmation et apprentissage automatique
+- Python, SQL, PyTorch, scikit-learn, pandas, NumPy, scripts d'automatisation, API REST, JavaScript, Java, Node.js, Express.js
+
+Outils et pratiques
+- Git, GitHub, Docker, CI/CD, pytest, VS Code, Google Colab, Prisma ORM, Agile / Scrum, Google Cloud Platform (GCP), Terraform, Pub/Sub
+
+Soutien et collaboration
+- Collecte des exigences, analyse des causes racines, communication avec les parties prenantes, gestion des incidents, documentation technique
+
+LANGUES
+Français - Courant
+Anglais - Courant

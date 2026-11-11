@@ -24,14 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-try:
-    from jobhunter.matching.requirements import PostingRequirements, analyze_posting
-    from jobhunter.matching.skills import SkillMatcher, get_matcher
-    from jobhunter.textutils import normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.requirements import PostingRequirements, analyze_posting
-    from matching.skills import SkillMatcher, get_matcher
-    from textutils import normalize_text
+from jobhunter.matching.requirements import PostingRequirements, analyze_posting
+from jobhunter.matching.skills import SkillMatcher, get_matcher
+from jobhunter.textutils import normalize_text
 
 SECTION_HEADERS = {
     "PROFESSIONAL SUMMARY",
@@ -61,17 +56,77 @@ MAX_PROJECTS = 2
 VARIANTS_FILENAME = "summary_variants.json"
 
 FAMILY_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("data_ml", ("machine learning", "data scientist", "ml engineer", "ai engineer", "deep learning",
-                 "data engineer", "computer vision", "nlp", "artificial intelligence", "mlops",
-                 "data science", "apprentissage automatique", "scientifique de donnees")),
-    ("devops_cloud", ("devops", "cloud", "site reliability", "sre", "infrastructure",
-                      "platform engineer", "infonuagique")),
-    ("analyst", ("analyst", "analyste", "business intelligence", "product owner", "consultant",
-                 "bi developer", "functional")),
-    ("support", ("support", "help desk", "service desk", "technical support", "it support",
-                 "desktop", "technicien", "soutien")),
-    ("software", ("software", "developer", "engineer", "programmer", "developpeur",
-                  "full stack", "backend", "python", "qa", "automation", "ingenieur")),
+    (
+        "data_ml",
+        (
+            "machine learning",
+            "data scientist",
+            "ml engineer",
+            "ai engineer",
+            "deep learning",
+            "data engineer",
+            "computer vision",
+            "nlp",
+            "artificial intelligence",
+            "mlops",
+            "data science",
+            "apprentissage automatique",
+            "scientifique de donnees",
+        ),
+    ),
+    (
+        "devops_cloud",
+        (
+            "devops",
+            "cloud",
+            "site reliability",
+            "sre",
+            "infrastructure",
+            "platform engineer",
+            "infonuagique",
+        ),
+    ),
+    (
+        "analyst",
+        (
+            "analyst",
+            "analyste",
+            "business intelligence",
+            "product owner",
+            "consultant",
+            "bi developer",
+            "functional",
+        ),
+    ),
+    (
+        "support",
+        (
+            "support",
+            "help desk",
+            "service desk",
+            "technical support",
+            "it support",
+            "desktop",
+            "technicien",
+            "soutien",
+        ),
+    ),
+    (
+        "software",
+        (
+            "software",
+            "developer",
+            "engineer",
+            "programmer",
+            "developpeur",
+            "full stack",
+            "backend",
+            "python",
+            "qa",
+            "automation",
+            "ingenieur",
+        ),
+    ),
 )
 
 
@@ -191,13 +246,18 @@ def classify_role_family(job_title: str, job_description: str = "") -> str:
     """Coarse role family used to pick a summary variant ("default" when unclear)."""
     title = normalize_text(job_title)
     for family, terms in FAMILY_TERMS:
-        if any(re.search(r"(?<![a-z0-9])" + re.escape(normalize_text(t)) + r"(?![a-z0-9])", title) for t in terms):
+        if any(
+            re.search(r"(?<![a-z0-9])" + re.escape(normalize_text(t)) + r"(?![a-z0-9])", title)
+            for t in terms
+        ):
             return family
     return "default"
 
 
 def _variants_path() -> Path:
-    return Path(__file__).parent / VARIANTS_FILENAME
+    from jobhunter.config.settings import RESUME_SOURCE_DIR
+
+    return Path(RESUME_SOURCE_DIR) / VARIANTS_FILENAME
 
 
 def load_summary_variants(language: str = "en") -> dict[str, str]:
@@ -236,7 +296,9 @@ def _apply_summary_variant(lines: list[str], sections: list[Section], variant: s
 # --------------------------------------------------------------------------
 # Skills section
 # --------------------------------------------------------------------------
-def _item_weight(item: str, weights: dict[str, float], matcher: SkillMatcher, posting_norm: str) -> float:
+def _item_weight(
+    item: str, weights: dict[str, float], matcher: SkillMatcher, posting_norm: str
+) -> float:
     ids = matcher.extract(item)
     if ids:
         return max((weights.get(skill_id, 0.0) for skill_id in ids), default=0.0)
@@ -252,7 +314,10 @@ def _reorder_skill_items(line: str, weights, matcher, posting_norm) -> tuple[str
     body = line.strip()[1:].strip() if prefix else line.strip()
     text, tags = split_tags(body)
     items = [item.strip() for item in text.split(",") if item.strip()]
-    scored = [(_item_weight(item, weights, matcher, posting_norm), index, item) for index, item in enumerate(items)]
+    scored = [
+        (_item_weight(item, weights, matcher, posting_norm), index, item)
+        for index, item in enumerate(items)
+    ]
     total = sum(weight for weight, _, _ in scored)
     if total <= 0:
         return line, 0.0
@@ -261,8 +326,10 @@ def _reorder_skill_items(line: str, weights, matcher, posting_norm) -> tuple[str
     return f"{prefix}{', '.join(ordered)}{suffix}", total
 
 
-def _reorder_skills_section(lines: list[str], section: Section, weights, matcher, posting_norm) -> list[str]:
-    body = lines[section.start + 1: section.end]
+def _reorder_skills_section(
+    lines: list[str], section: Section, weights, matcher, posting_norm
+) -> list[str]:
+    body = lines[section.start + 1 : section.end]
     groups: list[list[str]] = []
     for line in body:
         if not line.strip():
@@ -288,7 +355,7 @@ def _reorder_skills_section(lines: list[str], section: Section, weights, matcher
     if any(total > 0 for total, _, _ in scored_groups):
         scored_groups.sort(key=lambda t: (-t[0], t[1]))
     rebuilt = [line for _, _, group in scored_groups for line in group]
-    return lines[: section.start + 1] + rebuilt + lines[section.end:]
+    return lines[: section.start + 1] + rebuilt + lines[section.end :]
 
 
 # --------------------------------------------------------------------------
@@ -342,9 +409,9 @@ def tailor_resume_text(
             key=lambda pair: (-entry_score(pair[1], weights, matcher), pair[0]),
         )
         chosen = [entry for _, entry in ranked_entries[:max_projects]]
-        chosen_lines = [line for entry in chosen for line in lines[entry.start: entry.end]]
+        chosen_lines = [line for entry in chosen for line in lines[entry.start : entry.end]]
         before = lines[: project_section.start + 1]
-        after = lines[project_section.end:]
+        after = lines[project_section.end :]
         if chosen_lines and chosen_lines[-1].strip() and after:
             chosen_lines.append("")
         lines = before + chosen_lines + after

@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+from jobhunter.matching.inventory import resume_skill_ids
+from jobhunter.models import ScoringRulesConfig, UserProfile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BASE_DIR = Path(__file__).resolve().parents[1]
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
-
-from dotenv import load_dotenv  # noqa: E402
-
-from jobhunter.matching.inventory import resume_skill_ids  # noqa: E402
-from jobhunter.models import ScoringRulesConfig, UserProfile  # noqa: E402
 
 load_dotenv(REPOSITORY_ROOT / ".env")
+
+
+def _path_from_env(name: str, default: Path) -> Path:
+    value = os.getenv(name, "").strip()
+    return Path(value).expanduser() if value else default
 
 
 def _list_from_env(name: str, default: list[str]) -> list[str]:
@@ -33,11 +35,15 @@ JOBSPY_SITES = _list_from_env(
     "JOBSPY_SITES", ["indeed", "linkedin", "zip_recruiter", "glassdoor", "google"]
 )
 
-DATA_DIR = BASE_DIR / "data"
-LOG_DIR = BASE_DIR / "logs"
-OUTPUT_DIR = BASE_DIR / "outputs"
+# Where things live. Defaults keep everything inside the repository; the overrides let
+# demo mode use an isolated database without touching yours.
+DATA_DIR = _path_from_env("JOBHUNTER_DATA_DIR", BASE_DIR / "data")
+LOG_DIR = _path_from_env("JOBHUNTER_LOG_DIR", BASE_DIR / "logs")
+OUTPUT_DIR = _path_from_env("JOBHUNTER_OUTPUT_DIR", BASE_DIR / "outputs")
 RESUME_DIR = OUTPUT_DIR / "resumes"
-DB_PATH = DATA_DIR / "jobhunter.db"
+DB_PATH = _path_from_env("JOBHUNTER_DB_PATH", DATA_DIR / "jobhunter.db")
+# Folder holding your private master_resume.txt / master_resume_fr.txt / summary_variants.json
+RESUME_SOURCE_DIR = _path_from_env("JOBHUNTER_RESUME_DIR", BASE_DIR / "resume")
 
 USER_PROFILE_DATA = {
     "name": os.getenv("USER_NAME", "Your Name"),
@@ -55,7 +61,7 @@ USER_PROFILE_DATA = {
     "languages": [lang.lower() for lang in _list_from_env("USER_LANGUAGES", ["en", "fr"])],
     # Skill ids found in the local master resume files (empty when none exist)
     "resume_skills": resume_skill_ids(
-        BASE_DIR / "resume" / "master_resume.txt", BASE_DIR / "resume" / "master_resume_fr.txt"
+        RESUME_SOURCE_DIR / "master_resume.txt", RESUME_SOURCE_DIR / "master_resume_fr.txt"
     ),
     "preferred_company_size": "medium",
     "wants_stable_companies": True,
@@ -63,133 +69,142 @@ USER_PROFILE_DATA = {
     "avoid_heavy_coding_roles": False,
     "career_growth": True,
     "salary_focus": True,
-    "target_roles": _list_from_env("USER_TARGET_ROLES", [
-        # Core focus: junior software engineering, Python, automation, and ML roles
-        "Junior Software Engineer",
-        "Software Engineer I",
-        "Associate Software Engineer",
-        "Graduate Software Engineer",
-        "New Grad Software Engineer",
-        "Software Engineer",
-        "Junior Software Developer",
-        "Associate Software Developer",
-        "Software Developer",
-        "Python Developer",
-        "Junior Python Developer",
-        "Backend Developer",
-        "Backend Engineer",
-        "Junior Backend Developer",
-        "Full Stack Developer",
-        "Full Stack Engineer",
-        "Junior Full Stack Developer",
-        "Automation Engineer",
-        "Junior Automation Engineer",
-        "Test Automation Engineer",
-        "QA Automation Engineer",
-        "Junior Automation QA Engineer",
-        "Software QA Engineer",
-        "Machine Learning Engineer",
-        "Junior Machine Learning Engineer",
-        "ML Engineer",
-        "AI Engineer",
-        "Junior AI Engineer",
-        "Data Scientist",
-        "Junior Data Scientist",
-        "Data Engineer",
-        "Junior Data Engineer",
-        "Analytics Engineer",
-        "DevOps Engineer",
-        "Junior DevOps Engineer",
-        "Cloud Engineer",
-        "Site Reliability Engineer",
-        # Broader options, for a new grad who isn't too picky
-        "Business Analyst",
-        "Systems Analyst",
-        "Technical Systems Analyst",
-        "IT Business Analyst",
-        "Data Analyst",
-        "Business Intelligence Analyst",
-        "Product Analyst",
-        "QA Analyst",
-        "Quality Assurance Analyst",
-        "Test Analyst",
-        "Application Support Analyst",
-        "IT Support Analyst",
-        "Cloud Support Engineer",
-        "Cloud Operations Analyst",
-        "Functional Analyst",
-        "Analyste de systèmes",
-        "Analyste de données",
-        "Ingénieur logiciel junior",
-        "Développeur logiciel junior",
-    ]),
+    "target_roles": _list_from_env(
+        "USER_TARGET_ROLES",
+        [
+            # Core focus: junior software engineering, Python, automation, and ML roles
+            "Junior Software Engineer",
+            "Software Engineer I",
+            "Associate Software Engineer",
+            "Graduate Software Engineer",
+            "New Grad Software Engineer",
+            "Software Engineer",
+            "Junior Software Developer",
+            "Associate Software Developer",
+            "Software Developer",
+            "Python Developer",
+            "Junior Python Developer",
+            "Backend Developer",
+            "Backend Engineer",
+            "Junior Backend Developer",
+            "Full Stack Developer",
+            "Full Stack Engineer",
+            "Junior Full Stack Developer",
+            "Automation Engineer",
+            "Junior Automation Engineer",
+            "Test Automation Engineer",
+            "QA Automation Engineer",
+            "Junior Automation QA Engineer",
+            "Software QA Engineer",
+            "Machine Learning Engineer",
+            "Junior Machine Learning Engineer",
+            "ML Engineer",
+            "AI Engineer",
+            "Junior AI Engineer",
+            "Data Scientist",
+            "Junior Data Scientist",
+            "Data Engineer",
+            "Junior Data Engineer",
+            "Analytics Engineer",
+            "DevOps Engineer",
+            "Junior DevOps Engineer",
+            "Cloud Engineer",
+            "Site Reliability Engineer",
+            # Broader options, for a new grad who isn't too picky
+            "Business Analyst",
+            "Systems Analyst",
+            "Technical Systems Analyst",
+            "IT Business Analyst",
+            "Data Analyst",
+            "Business Intelligence Analyst",
+            "Product Analyst",
+            "QA Analyst",
+            "Quality Assurance Analyst",
+            "Test Analyst",
+            "Application Support Analyst",
+            "IT Support Analyst",
+            "Cloud Support Engineer",
+            "Cloud Operations Analyst",
+            "Functional Analyst",
+            "Analyste de systèmes",
+            "Analyste de données",
+            "Ingénieur logiciel junior",
+            "Développeur logiciel junior",
+        ],
+    ),
     # Subset of target_roles ranked highest during scoring; analyst/support
     # roles above remain valid matches but score below these when both are present.
-    "priority_target_roles": _list_from_env("USER_PRIORITY_TARGET_ROLES", [
-        "Junior Software Engineer",
-        "Software Engineer I",
-        "Associate Software Engineer",
-        "Graduate Software Engineer",
-        "New Grad Software Engineer",
-        "Software Engineer",
-        "Junior Software Developer",
-        "Associate Software Developer",
-        "Software Developer",
-        "Python Developer",
-        "Junior Python Developer",
-        "Backend Developer",
-        "Backend Engineer",
-        "Junior Backend Developer",
-        "Full Stack Developer",
-        "Full Stack Engineer",
-        "Junior Full Stack Developer",
-        "Automation Engineer",
-        "Junior Automation Engineer",
-        "Test Automation Engineer",
-        "QA Automation Engineer",
-        "Junior Automation QA Engineer",
-        "Software QA Engineer",
-        "Machine Learning Engineer",
-        "Junior Machine Learning Engineer",
-        "ML Engineer",
-        "AI Engineer",
-        "Junior AI Engineer",
-        "Data Scientist",
-        "Junior Data Scientist",
-        "Data Engineer",
-        "Junior Data Engineer",
-        "Analytics Engineer",
-        "DevOps Engineer",
-        "Junior DevOps Engineer",
-        "Cloud Engineer",
-        "Site Reliability Engineer",
-        "Ingénieur logiciel junior",
-        "Développeur logiciel junior",
-    ]),
-    "keywords": _list_from_env("USER_KEYWORDS", [
-        "python",
-        "automation",
-        "machine learning",
-        "data pipelines",
-        "pandas",
-        "numpy",
-        "scikit-learn",
-        "pytorch",
-        "pytest",
-        "unit testing",
-        "ci/cd",
-        "docker",
-        "rest api",
-        "sql",
-        "git",
-        "scripting",
-        "algorithms",
-        "data structures",
-        "cloud",
-        "agile",
-        "troubleshooting",
-        "excel",
-    ]),
+    "priority_target_roles": _list_from_env(
+        "USER_PRIORITY_TARGET_ROLES",
+        [
+            "Junior Software Engineer",
+            "Software Engineer I",
+            "Associate Software Engineer",
+            "Graduate Software Engineer",
+            "New Grad Software Engineer",
+            "Software Engineer",
+            "Junior Software Developer",
+            "Associate Software Developer",
+            "Software Developer",
+            "Python Developer",
+            "Junior Python Developer",
+            "Backend Developer",
+            "Backend Engineer",
+            "Junior Backend Developer",
+            "Full Stack Developer",
+            "Full Stack Engineer",
+            "Junior Full Stack Developer",
+            "Automation Engineer",
+            "Junior Automation Engineer",
+            "Test Automation Engineer",
+            "QA Automation Engineer",
+            "Junior Automation QA Engineer",
+            "Software QA Engineer",
+            "Machine Learning Engineer",
+            "Junior Machine Learning Engineer",
+            "ML Engineer",
+            "AI Engineer",
+            "Junior AI Engineer",
+            "Data Scientist",
+            "Junior Data Scientist",
+            "Data Engineer",
+            "Junior Data Engineer",
+            "Analytics Engineer",
+            "DevOps Engineer",
+            "Junior DevOps Engineer",
+            "Cloud Engineer",
+            "Site Reliability Engineer",
+            "Ingénieur logiciel junior",
+            "Développeur logiciel junior",
+        ],
+    ),
+    "keywords": _list_from_env(
+        "USER_KEYWORDS",
+        [
+            "python",
+            "automation",
+            "machine learning",
+            "data pipelines",
+            "pandas",
+            "numpy",
+            "scikit-learn",
+            "pytorch",
+            "pytest",
+            "unit testing",
+            "ci/cd",
+            "docker",
+            "rest api",
+            "sql",
+            "git",
+            "scripting",
+            "algorithms",
+            "data structures",
+            "cloud",
+            "agile",
+            "troubleshooting",
+            "excel",
+        ],
+    ),
 }
 
 # Typed User Profile instance and backward-compatible dict
@@ -207,22 +222,26 @@ JOB_SEARCH_URLS = [
 # Public company career pages to check in addition to job boards. These pages
 # may expose JobPosting JSON-LD or static job links; JavaScript-only pages are
 # skipped safely and can be covered by the Greenhouse/Lever adapters.
-COMPANY_CAREER_URLS = _list_from_env("COMPANY_CAREER_URLS", [
-    "Genetec|https://www.genetec.com/careers",
-    "CMLS Financial|https://www.cmls.ca/careers",
-    "Shopify|https://www.shopify.com/careers",
-    "Coveo|https://www.coveo.com/en/company/careers",
-    "Mila|https://mila.quebec/en/careers",
-    "Lightspeed|https://www.lightspeedhq.com/careers/",
-    "CAE|https://www.cae.com/careers/",
-    "Intact|https://careers.intactfc.com/",
-    "RBC|https://jobs.rbc.com/ca/en",
-    "TD Bank|https://jobs.td.com/en-CA/",
-    "Scotiabank|https://jobs.scotiabank.com/",
-    "BMO|https://jobs.bmo.com/",
-    "National Bank of Canada|https://emplois.bnc.ca/",
-    "Desjardins|https://www.desjardins.com/ca/about-us/careers/",
-])
+COMPANY_CAREER_URLS = _list_from_env(
+    "COMPANY_CAREER_URLS",
+    [
+        "Genetec|https://www.genetec.com/careers",
+        "CMLS Financial|https://www.cmls.ca/careers",
+        "Shopify|https://www.shopify.com/careers",
+        "Coveo|https://www.coveo.com/en/company/careers",
+        "Mila|https://mila.quebec/en/careers",
+        "Lightspeed|https://www.lightspeedhq.com/careers/",
+        "CAE|https://www.cae.com/careers/",
+        "Intact|https://careers.intactfc.com/",
+        "RBC|https://jobs.rbc.com/ca/en",
+        "TD Bank|https://jobs.td.com/en-CA/",
+        "Scotiabank|https://jobs.scotiabank.com/",
+        "BMO|https://jobs.bmo.com/",
+        "National Bank of Canada|https://emplois.bnc.ca/",
+        "Desjardins|https://www.desjardins.com/ca/about-us/careers/",
+    ],
+)
+
 
 # ---------------------------------------------------------------------------
 # Additional job sources. Every entry is optional; unset means "not used".
@@ -249,7 +268,7 @@ GREENHOUSE_BOARDS = _tuples_from_env(
     2,
     [("Stripe", "stripe"), ("GitLab", "gitlab"), ("Databricks", "databricks")],
 )
-LEVER_BOARDS = _tuples_from_env("LEVER_COMPANIES", 2, [("Figma", "figma")])
+LEVER_BOARDS = _tuples_from_env("LEVER_COMPANIES", 2)
 ASHBY_BOARDS = _tuples_from_env("ASHBY_COMPANIES", 2)
 WORKABLE_BOARDS = _tuples_from_env("WORKABLE_COMPANIES", 2)
 SMARTRECRUITERS_BOARDS = _tuples_from_env("SMARTRECRUITERS_COMPANIES", 2)
@@ -302,6 +321,7 @@ SCORING_RULES_DATA = {
     "freshness_bonus": 3,
     "stale_penalty": 3,
     "entry_level_min_fit_score": 55,
+    "soft_cap": 88,
     "max_score": 100,
 }
 

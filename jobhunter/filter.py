@@ -4,16 +4,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any
 
-try:
-    from jobhunter.config.settings import USER_PROFILE
-    from jobhunter.matching.levels import is_entry_level
-    from jobhunter.models import JobListing, UserProfile
-    from jobhunter.textutils import contains_any_term, normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import USER_PROFILE
-    from matching.levels import is_entry_level
-    from models import JobListing, UserProfile
-    from textutils import contains_any_term, normalize_text
+from jobhunter.config.settings import USER_PROFILE
+from jobhunter.matching.levels import is_entry_level
+from jobhunter.models import JobListing, UserProfile
+from jobhunter.textutils import contains_any_term, normalize_text
 
 
 def _title_matches_target(title: str, profile: UserProfile | dict[str, Any] | None = None) -> bool:
@@ -69,33 +63,88 @@ def _title_matches_target(title: str, profile: UserProfile | dict[str, Any] | No
 # Towns that make up Greater Montreal. Postings often list the borough or suburb
 # ("Saint-Laurent, QC") instead of "Montreal".
 MONTREAL_AREA_TERMS = (
-    "montreal", "laval", "longueuil", "brossard", "west island", "south shore",
-    "north shore", "saint laurent", "ville saint laurent", "dorval", "pointe claire",
-    "kirkland", "dollard des ormeaux", "boucherville", "saint lambert", "westmount",
-    "town of mount royal", "anjou", "lasalle", "verdun", "terrebonne", "blainville",
-    "repentigny", "vaudreuil",
+    "montreal",
+    "laval",
+    "longueuil",
+    "brossard",
+    "west island",
+    "south shore",
+    "north shore",
+    "saint laurent",
+    "ville saint laurent",
+    "dorval",
+    "pointe claire",
+    "kirkland",
+    "dollard des ormeaux",
+    "boucherville",
+    "saint lambert",
+    "westmount",
+    "town of mount royal",
+    "anjou",
+    "lasalle",
+    "verdun",
+    "terrebonne",
+    "blainville",
+    "repentigny",
+    "vaudreuil",
 )
 
 UNKNOWN_LOCATIONS = frozenset({"", "unknown", "n/a", "na", "none", "nan", "not specified", "null"})
 
 # Markers that a "remote" job is only open to residents of another region.
 REMOTE_REGION_MARKERS = (
-    "us", "usa", "united states", "uk", "united kingdom", "europe", "emea", "apac",
-    "latam", "india", "germany", "spain", "poland", "australia", "brazil", "mexico",
-    "philippines", "singapore", "ireland", "netherlands",
+    "us",
+    "usa",
+    "united states",
+    "uk",
+    "united kingdom",
+    "europe",
+    "emea",
+    "apac",
+    "latam",
+    "india",
+    "germany",
+    "spain",
+    "poland",
+    "australia",
+    "brazil",
+    "mexico",
+    "philippines",
+    "singapore",
+    "ireland",
+    "netherlands",
 )
 REMOTE_REGION_PHRASES = (
-    "us only", "u s only", "usa only", "united states only", "us based", "u s based",
-    "must be located in the us", "must be located in the u s",
-    "must be located in the united states", "must reside in the us",
-    "must reside in the united states", "must live in the us",
-    "authorized to work in the us", "authorized to work in the u s",
-    "authorized to work in the united states", "eligible to work in the us",
-    "eligible to work in the united states", "us work authorization",
-    "u s work authorization", "us citizens only", "u s citizens only", "us citizen",
-    "within the united states", "residents of the united states",
-    "based in the united states", "open to candidates in the us",
-    "uk based", "must be based in the uk", "eu based", "right to work in the uk",
+    "us only",
+    "u s only",
+    "usa only",
+    "united states only",
+    "us based",
+    "u s based",
+    "must be located in the us",
+    "must be located in the u s",
+    "must be located in the united states",
+    "must reside in the us",
+    "must reside in the united states",
+    "must live in the us",
+    "authorized to work in the us",
+    "authorized to work in the u s",
+    "authorized to work in the united states",
+    "eligible to work in the us",
+    "eligible to work in the united states",
+    "us work authorization",
+    "u s work authorization",
+    "us citizens only",
+    "u s citizens only",
+    "us citizen",
+    "within the united states",
+    "residents of the united states",
+    "based in the united states",
+    "open to candidates in the us",
+    "uk based",
+    "must be based in the uk",
+    "eu based",
+    "right to work in the uk",
 )
 OPEN_REMOTE_MARKERS = ("canada", "canadian", "worldwide", "anywhere", "global", "north america")
 
@@ -140,8 +189,7 @@ class IJobPredicate(ABC):
     """Abstract predicate for job filtering."""
 
     @abstractmethod
-    def evaluate(self, job: dict[str, Any]) -> bool:
-        pass
+    def evaluate(self, job: dict[str, Any]) -> bool: ...
 
 
 class TargetRolePredicate(IJobPredicate):
@@ -159,7 +207,9 @@ class LocationAndRemotePredicate(IJobPredicate):
         if location_is_unknown(location):
             # No location at all: only keep the posting if its own text places it in
             # Greater Montreal. (A missing location must never be read as "Remote".)
-            text = normalize_text(f"{job.get('title', '')} {str(job.get('description') or '')[:2000]}")
+            text = normalize_text(
+                f"{job.get('title', '')} {str(job.get('description') or '')[:2000]}"
+            )
             return contains_any_term(text, MONTREAL_AREA_TERMS)
         # A remote label must not override an explicit non-local office
         # location (for example, a Seattle role whose description mentions

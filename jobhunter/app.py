@@ -13,65 +13,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Ensure project root is in sys.path when script is run directly
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from apscheduler.schedulers.background import BackgroundScheduler  # noqa: E402
 
-try:
-    from jobhunter.config.settings import (
-        BASE_DIR,
-        JOB_SEARCH_URLS,
-        MAX_PERSISTED_JOBS,
-        OUTPUT_DIR,
-    )
-    from jobhunter.daily_report import generate_daily_report
-    from jobhunter.filter import filter_jobs
-    from jobhunter.scoring.engine import score_jobs
-    from jobhunter.scoring.feedback import FeedbackModel
-    from jobhunter.scraper.collector import (
-        BaseScraper,
-        canonical_job_url,
-        collect_jobs_from_urls,
-    )
-    from jobhunter.scraper.dedupe import dedupe_jobs
-    from jobhunter.scraper.enrich import enrich_descriptions
-    from jobhunter.scraper.sources import build_default_scrapers
-    from jobhunter.tracker.db import (
-        ensure_database,
-        filter_applied_jobs,
-        get_feedback_examples,
-        purge_nonlocal_jobs,
-        purge_placeholder_jobs,
-        purge_red_flag_jobs,
-        save_jobs,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import BASE_DIR, JOB_SEARCH_URLS, MAX_PERSISTED_JOBS, OUTPUT_DIR
-    from daily_report import generate_daily_report
-    from filter import filter_jobs
-    from scoring.engine import score_jobs
-    from scoring.feedback import FeedbackModel
-    from scraper.collector import (
-        BaseScraper,
-        canonical_job_url,
-        collect_jobs_from_urls,
-    )
-    from scraper.dedupe import dedupe_jobs
-    from scraper.enrich import enrich_descriptions
-    from scraper.sources import build_default_scrapers
-    from tracker.db import (
-        ensure_database,
-        filter_applied_jobs,
-        get_feedback_examples,
-        purge_nonlocal_jobs,
-        purge_placeholder_jobs,
-        purge_red_flag_jobs,
-        save_jobs,
-    )
-
+from jobhunter.config.settings import (
+    BASE_DIR,
+    JOB_SEARCH_URLS,
+    MAX_PERSISTED_JOBS,
+    OUTPUT_DIR,
+)
+from jobhunter.daily_report import generate_daily_report
+from jobhunter.filter import filter_jobs
+from jobhunter.scoring.engine import score_jobs
+from jobhunter.scoring.feedback import FeedbackModel
+from jobhunter.scraper.collector import (
+    BaseScraper,
+    canonical_job_url,
+    collect_jobs_from_urls,
+)
+from jobhunter.scraper.dedupe import dedupe_jobs
+from jobhunter.scraper.enrich import enrich_descriptions
+from jobhunter.scraper.sources import build_default_scrapers
+from jobhunter.tracker.db import (
+    ensure_database,
+    filter_applied_jobs,
+    get_feedback_examples,
+    purge_nonlocal_jobs,
+    purge_placeholder_jobs,
+    purge_red_flag_jobs,
+    save_jobs,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_COLLECTION_HOUR = 8
@@ -97,8 +67,7 @@ class IPipelineStage(ABC):
     """Abstract interface for a job collection pipeline stage."""
 
     @abstractmethod
-    def process(self, context: dict[str, Any]) -> dict[str, Any]:
-        pass
+    def process(self, context: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class ExtractionStage(IPipelineStage):
@@ -121,7 +90,10 @@ class ExtractionStage(IPipelineStage):
                 scraped = scraper.scrape()
                 jobs.extend(scraped)
                 source_counts[name] = len(scraped)
-                LOGGER.info("%s returned %s postings.", name, len(scraped))
+                if not scraped and getattr(scraper, "companies", None) is not None:
+                    LOGGER.info("%s returned 0 postings (no boards configured).", name)
+                else:
+                    LOGGER.info("%s returned %s postings.", name, len(scraped))
             except Exception:
                 source_counts[name] = 0
                 LOGGER.exception("Scraper %s failed during collection.", name)
@@ -199,9 +171,7 @@ class PersistenceStage(IPipelineStage):
         unseen_jobs = dependencies.filter_applied_jobs(filtered_jobs)
         top_jobs = unseen_jobs[: self.limit]
         saved_count = dependencies.save_jobs(top_jobs)
-        context["persisted_count"] = (
-            saved_count if isinstance(saved_count, int) else len(top_jobs)
-        )
+        context["persisted_count"] = saved_count if isinstance(saved_count, int) else len(top_jobs)
 
         output_path = dependencies.output_dir / "daily_jobs.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,12 +204,16 @@ class JobCollectionPipeline:
         dependencies: CollectionDependencies | None = None,
     ):
         self.dependencies = dependencies or CollectionDependencies()
-        self.stages = list(stages) if stages is not None else [
-            ExtractionStage(),
-            ScoringStage(),
-            FilteringStage(),
-            PersistenceStage(dependencies=self.dependencies),
-        ]
+        self.stages = (
+            list(stages)
+            if stages is not None
+            else [
+                ExtractionStage(),
+                ScoringStage(),
+                FilteringStage(),
+                PersistenceStage(dependencies=self.dependencies),
+            ]
+        )
         for stage in self.stages:
             if isinstance(stage, PersistenceStage) and stage.dependencies is None:
                 stage.dependencies = self.dependencies
@@ -308,6 +282,8 @@ def start_dashboard() -> subprocess.Popen:
     """Launch Streamlit as a child process so app.py remains the only command required."""
     dashboard_path = BASE_DIR / "dashboard" / "app.py"
     port = os.getenv("JOBHUNTER_DASHBOARD_PORT", "8501")
+    # Loopback by default: the dashboard has no login and shows personal job-search data.
+    host = os.getenv("JOBHUNTER_DASHBOARD_HOST", "127.0.0.1")
     command = [
         sys.executable,
         "-m",
@@ -315,10 +291,15 @@ def start_dashboard() -> subprocess.Popen:
         "run",
         str(dashboard_path),
         "--server.address",
-        "127.0.0.1",
+        host,
         "--server.port",
         port,
+        "--browser.gatherUsageStats",
+        "false",
     ]
+    # Local runs open a browser tab; containers/servers set JOBHUNTER_DASHBOARD_HEADLESS=true.
+    if os.getenv("JOBHUNTER_DASHBOARD_HEADLESS", "").strip().lower() in {"1", "true", "yes"}:
+        command += ["--server.headless", "true"]
     return subprocess.Popen(command, cwd=BASE_DIR)
 
 
@@ -328,19 +309,22 @@ def main() -> None:
     hour = int(os.getenv("JOBHUNTER_COLLECTION_HOUR", DEFAULT_COLLECTION_HOUR))
     minute = int(os.getenv("JOBHUNTER_COLLECTION_MINUTE", DEFAULT_COLLECTION_MINUTE))
     scheduler = create_daily_scheduler(hour, minute)
-    run_scheduled_collection()
+    # Dashboard first: the first collection can take minutes, so run it in the background
+    # instead of making the app look unresponsive (and failing container health checks).
     dashboard_process = start_dashboard()
     scheduler.start()
+    scheduler.add_job(run_scheduled_collection, id="startup-collection")
 
     port = os.getenv("JOBHUNTER_DASHBOARD_PORT", "8501")
-    print(f"Dashboard available at http://127.0.0.1:{port}")
+    print(f"Dashboard available at http://localhost:{port}")
+    print("Collecting jobs in the background; refresh the dashboard as results arrive.")
     print(f"Daily collection scheduled for {hour:02d}:{minute:02d} local time.")
-    print("Press Ctrl+C to stop JobHunterAI.")
+    print("Press Ctrl+C to stop JobHunter.")
 
     try:
         dashboard_process.wait()
     except KeyboardInterrupt:
-        print("Stopping JobHunterAI...")
+        print("Stopping JobHunter...")
     finally:
         scheduler.shutdown(wait=False)
         if dashboard_process.poll() is None:

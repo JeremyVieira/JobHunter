@@ -1,0 +1,70 @@
+Alex Example
+123 Example Street
+Montreal, H0H 0H0
+(514) 555-0100
+alex.example@gmail.com
+https://github.com/alex-example
+https://www.linkedin.com/in/alex-example/
+
+PROFESSIONAL SUMMARY
+Bilingual Software Engineering graduate from Lakeside University with hands-on experience spanning IT support, cloud infrastructure, full-stack and mobile development, automation, and machine learning. Resolved technical incidents and improved support processes in corporate IT roles, built and tested cloud infrastructure using Google Cloud Platform, Terraform, and Pub/Sub as part of an industry capstone project, and wrote automation scripts and REST APIs in Python. Also contributed to full-stack web applications, a React Native mobile app, and trained machine learning models with PyTorch and scikit-learn. Collaborates effectively in Agile teams and brings strong written and verbal communication in both French and English.
+
+EXPERIENCE
+
+Example Logistics Inc, Montreal — End User Support Analyst
+April 2024 - Current
+- Resolved technical incidents and conducted root-cause analysis for corporate operations across Quebec
+- Collaborated with cross-functional teams across Canada to improve support processes and documentation
+
+Example Tech Corp, Montreal — IT Help Desk Analyst
+January 2024 - April 2024
+- Resolved hardware, software, and network issues to reduce downtime and support stable operations
+- Gathered requirements and translated operational challenges into technical support solutions
+
+EDUCATION
+
+Lakeside University, Montreal — Bachelor of Science in Software Engineering
+September 2022 - June 2026
+
+Lakeside College, Montreal — DEC (Diploma of College Studies) in Computer Science and Mathematics
+August 2020 - April 2022
+
+PROJECTS
+
+Colorectal Cancer Detection Using Deep Learning
+- Built a ResNet18 image-classification pipeline with PyTorch and torchvision for three colorectal histology tissue classes
+- Implemented a data preprocessing and augmentation pipeline, validating results with cross-validation and confusion matrix analysis
+- Applied scikit-learn and Google Colab with GPU acceleration
+
+JobHunter — Job Search and Application Platform
+- Built a Python platform that collects job postings from multiple sources, scores and filters opportunities, and tracks applications in SQLite
+- Developed a Streamlit dashboard and English/French application-document generation, with an in-process daily collection schedule while the app is running
+- Added automated tests for scraping, scoring, tracking, and document generation
+
+Machine Learning Coursework (472-A2) — Classification and Clustering
+- Implemented K-Means, decision-tree, MLP, and CNN experiments on Iris and Fashion-MNIST datasets
+- Generated training curves, confusion matrices, and per-class precision, recall, and F1 evaluation outputs
+
+SvelteShipSolutions — Team Full-Stack Web Application
+- Contributed to a team-developed shipping and logistics application with package tracking and automated rate quoting
+- Modeled relational data and integrated third-party REST APIs (Google Places API) using Prisma ORM and SQL
+- Collaborated in an Agile team using iterative development and Git version control
+
+Campus Guide Mobile App — Team Project
+- Contributed to a React Native and Expo mobile navigation app, including campus maps, indoor and outdoor directions, and schedule-aware routing
+- Implemented GPS tracking and a real-time user location indicator on the map
+
+TECHNICAL SKILLS
+
+Programming & Machine Learning
+- Python, SQL, PyTorch, scikit-learn, pandas, NumPy, automation scripting, REST APIs, JavaScript, Java, Node.js, Express.js
+
+Tools & Practices
+- Git, GitHub, Docker, CI/CD, pytest, VS Code, Google Colab, Prisma ORM, Agile / Scrum, Google Cloud Platform (GCP), Terraform, Pub/Sub
+
+Support & Collaboration
+- Requirements Gathering, Root Cause Analysis, Stakeholder Communication, Incident Management, Technical Documentation
+
+LANGUAGES
+French - Fluent
+English - Fluent

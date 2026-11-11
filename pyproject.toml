@@ -1,3 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jobhunter"
+version = "2.0.0"
+description = "Collect, score and track job postings, and prepare honest, verified application documents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dynamic = ["dependencies"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Office/Business",
+]
+
+[project.scripts]
+jobhunter = "jobhunter.cli:main"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["jobhunter/requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["jobhunter*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+jobhunter = [
+    "demo_data/*.txt",
+    # templates only - never the private master_resume*.txt / summary_variants.json
+    "resume/*.template.txt",
+    "resume/*.template.json",
+    ".streamlit/*.toml",
+]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]

@@ -4,10 +4,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-try:
-    from jobhunter.config.settings import OUTPUT_DIR
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import OUTPUT_DIR
+from jobhunter.config.settings import OUTPUT_DIR
 
 
 def generate_email_summary(top_jobs: list[dict[str, Any]]) -> str:

@@ -12,56 +12,64 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-try:
-    from jobhunter.matching.requirements import (
-        analyze_posting,
-        candidate_inventory,
-        closest_related,
-        compare_requirements,
-    )
-    from jobhunter.matching.skills import SkillMatcher, get_matcher
-    from jobhunter.resume.tailoring import (
-        EDUCATION_HEADERS,
-        EXPERIENCE_HEADERS,
-        LANGUAGE_HEADERS,
-        PROJECT_HEADERS,
-        SUMMARY_HEADERS,
-        Entry,
-        classify_role_family,
-        entry_label_parts,
-        parse_sections,
-        posting_weights,
-    )
-    from jobhunter.textutils import normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.requirements import (
-        analyze_posting,
-        candidate_inventory,
-        closest_related,
-        compare_requirements,
-    )
-    from matching.skills import SkillMatcher, get_matcher
-    from resume.tailoring import (
-        EDUCATION_HEADERS,
-        EXPERIENCE_HEADERS,
-        LANGUAGE_HEADERS,
-        PROJECT_HEADERS,
-        SUMMARY_HEADERS,
-        Entry,
-        classify_role_family,
-        entry_label_parts,
-        parse_sections,
-        posting_weights,
-    )
-    from textutils import normalize_text
+from jobhunter.matching.requirements import (
+    analyze_posting,
+    candidate_inventory,
+    closest_related,
+    compare_requirements,
+)
+from jobhunter.matching.skills import SkillMatcher, get_matcher
+from jobhunter.resume.tailoring import (
+    EDUCATION_HEADERS,
+    EXPERIENCE_HEADERS,
+    LANGUAGE_HEADERS,
+    PROJECT_HEADERS,
+    SUMMARY_HEADERS,
+    Entry,
+    classify_role_family,
+    entry_label_parts,
+    parse_sections,
+    posting_weights,
+)
+from jobhunter.textutils import normalize_text
 
 _MONTHS = {
-    "jan": 1, "january": 1, "janvier": 1, "feb": 2, "february": 2, "fevrier": 2,
-    "mar": 3, "march": 3, "mars": 3, "apr": 4, "april": 4, "avril": 4, "may": 5, "mai": 5,
-    "jun": 6, "june": 6, "juin": 6, "jul": 7, "july": 7, "juillet": 7, "aug": 8,
-    "august": 8, "aout": 8, "sep": 9, "sept": 9, "september": 9, "septembre": 9,
-    "oct": 10, "october": 10, "octobre": 10, "nov": 11, "november": 11, "novembre": 11,
-    "dec": 12, "december": 12, "decembre": 12,
+    "jan": 1,
+    "january": 1,
+    "janvier": 1,
+    "feb": 2,
+    "february": 2,
+    "fevrier": 2,
+    "mar": 3,
+    "march": 3,
+    "mars": 3,
+    "apr": 4,
+    "april": 4,
+    "avril": 4,
+    "may": 5,
+    "mai": 5,
+    "jun": 6,
+    "june": 6,
+    "juin": 6,
+    "jul": 7,
+    "july": 7,
+    "juillet": 7,
+    "aug": 8,
+    "august": 8,
+    "aout": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "septembre": 9,
+    "oct": 10,
+    "october": 10,
+    "octobre": 10,
+    "nov": 11,
+    "november": 11,
+    "novembre": 11,
+    "dec": 12,
+    "december": 12,
+    "decembre": 12,
 }
 _ONGOING = ("current", "present", "aujourd", "en cours", "actuel")
 _FLUENT = ("fluent", "native", "courant", "bilingue", "langue maternelle", "maternelle")
@@ -139,11 +147,14 @@ def _language_claim(lines: list[str], sections) -> str | None:
         ]
         fluent = [line for line in body if any(word in line for word in _FLUENT)]
         wants = {"french": ("french", "francais"), "english": ("english", "anglais")}
-        if all(any(any(alias in line for alias in aliases) for line in fluent) for aliases in wants.values()):
+        if all(
+            any(any(alias in line for alias in aliases) for line in fluent)
+            for aliases in wants.values()
+        ):
             return "fluent"
     summary = next((s for s in sections if s.header in SUMMARY_HEADERS), None)
     if summary:
-        text = normalize_text(" ".join(lines[summary.start + 1: summary.end]))
+        text = normalize_text(" ".join(lines[summary.start + 1 : summary.end]))
         if "bilingual" in text or "bilingue" in text:
             return "bilingual"
     return None
@@ -167,7 +178,9 @@ def _evidence_candidates(resume_text: str, matcher: SkillMatcher, prefer_project
                     for tag in bullet.tags:
                         skills.update(matcher.extract(tag))
                     candidates.append(
-                        Evidence((section.header, index), kind, name, bullet.text.rstrip(". "), skills)
+                        Evidence(
+                            (section.header, index), kind, name, bullet.text.rstrip(". "), skills
+                        )
                     )
     education = None
     for section in sections:
@@ -177,7 +190,9 @@ def _evidence_candidates(resume_text: str, matcher: SkillMatcher, prefer_project
     return candidates, education, _language_claim(lines, sections)
 
 
-def select_evidence(candidates: list[Evidence], weights: dict[str, float], max_items: int = 3) -> list[Evidence]:
+def select_evidence(
+    candidates: list[Evidence], weights: dict[str, float], max_items: int = 3
+) -> list[Evidence]:
     """Greedy cover: best new-requirement coverage first, at most one bullet per entry."""
     chosen: list[Evidence] = []
     covered: set[str] = set()
@@ -213,7 +228,9 @@ def _fallback_evidence(candidates: list[Evidence], count: int = 2) -> list[Evide
 
 
 def _sentence_en(item: Evidence) -> str:
-    lead = f"In my role at {item.name}" if item.kind == "experience" else f"In my {item.name} project"
+    lead = (
+        f"In my role at {item.name}" if item.kind == "experience" else f"In my {item.name} project"
+    )
     first = item.text.split(" ", 1)[0].lower()
     if first.endswith("ing"):
         return f"{lead}, my work included {_lower_first(item.text)}."
@@ -251,7 +268,9 @@ def build_cover_letter(
     weights = posting_weights(requirements)
     family = classify_role_family(job_title, job_description)
     candidates, education, language_claim = _evidence_candidates(
-        resume_text, matcher, prefer_projects=family in {"software", "data_ml", "devops_cloud", "default"}
+        resume_text,
+        matcher,
+        prefer_projects=family in {"software", "data_ml", "devops_cloud", "default"},
     )
     inventory = candidate_inventory((), resume_text, matcher)
     comparison = compare_requirements(requirements, inventory)
@@ -319,18 +338,33 @@ def build_cover_letter(
                         f"used is {matcher.label(related)}."
                     )
     posting_norm = normalize_text(f"{title} {job_description}")
-    wants_french = requirements.bilingual or requirements.language == "fr" or "french" in posting_norm or "francais" in posting_norm
+    wants_french = (
+        requirements.bilingual
+        or requirements.language == "fr"
+        or "french" in posting_norm
+        or "francais" in posting_norm
+    )
     if language_claim and wants_french:
         if fr:
-            extras.append("Je travaille couramment en français et en anglais." if language_claim == "fluent" else "Je suis bilingue (français et anglais).")
+            extras.append(
+                "Je travaille couramment en français et en anglais."
+                if language_claim == "fluent"
+                else "Je suis bilingue (français et anglais)."
+            )
         else:
-            extras.append("I am fluent in both English and French." if language_claim == "fluent" else "I am bilingual in English and French.")
+            extras.append(
+                "I am fluent in both English and French."
+                if language_claim == "fluent"
+                else "I am bilingual in English and French."
+            )
     if extras:
         paragraphs.append(" ".join(extras))
 
     if not evidence and not education:
         paragraphs.append(
-            "Vous trouverez mon curriculum vitæ en pièce jointe." if fr else "I have included my resume for your review."
+            "Vous trouverez mon curriculum vitæ en pièce jointe."
+            if fr
+            else "I have included my resume for your review."
         )
 
     closing = (

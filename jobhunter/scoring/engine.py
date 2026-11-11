@@ -6,36 +6,23 @@ from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any
 
-try:
-    from jobhunter.config.settings import SCORING_RULES, USER_PROFILE
-    from jobhunter.matching.levels import is_entry_level
-    from jobhunter.matching.requirements import (
-        analyze_posting,
-        candidate_inventory,
-        compare_requirements,
-        extract_required_years,
-        skill_score_from_match,
-    )
-    from jobhunter.matching.skills import expand_inventory, get_matcher
-    from jobhunter.models import JobListing, ScoringRulesConfig, UserProfile
-    from jobhunter.textutils import (
-        contains_any_term,
-        days_since,
-        normalize_text,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import SCORING_RULES, USER_PROFILE
-    from matching.levels import is_entry_level
-    from matching.requirements import (
-        analyze_posting,
-        candidate_inventory,
-        compare_requirements,
-        extract_required_years,
-        skill_score_from_match,
-    )
-    from matching.skills import expand_inventory, get_matcher
-    from models import JobListing, ScoringRulesConfig, UserProfile
-    from textutils import contains_any_term, days_since, normalize_text
+from jobhunter.config.settings import SCORING_RULES, USER_PROFILE
+from jobhunter.matching.levels import is_entry_level
+from jobhunter.matching.requirements import (
+    analyze_posting,
+    candidate_inventory,
+    compare_requirements,
+    extract_required_years,
+    skill_score_from_match,
+)
+from jobhunter.matching.skills import expand_inventory, get_matcher
+from jobhunter.models import JobListing, ScoringRulesConfig, UserProfile
+from jobhunter.textutils import (
+    contains_any_term,
+    days_since,
+    normalize_salary,
+    normalize_text,
+)
 
 # Relative weights used when a config does not override them. Title, experience and
 # requirement coverage separate good from bad matches; the remaining dimensions are
@@ -113,15 +100,22 @@ def _profile_get(profile: UserProfile | dict[str, Any] | None, name: str, defaul
 
 
 def parse_salary(value: str) -> float:
-    if not value or value.lower() in {"not disclosed", "n/a", "unknown"}:
+    """Midpoint of a normalized salary string, in CAD/year; 85k when undisclosed.
+
+    Salary strings are canonicalized by :func:`normalize_salary` at collection
+    time; hourly figures are converted to an annual estimate (x 2080).
+    """
+    normalized = normalize_salary(value)
+    if normalized == "Not disclosed":
         return 85000.0
-    matches = re.findall(r"(?<![a-z0-9])(\d[\d,]*(?:\.\d+)?)\s*([kmb]?)", value, re.I)
+    matches = re.findall(r"(?<![a-z0-9])(\d[\d,]*(?:\.\d+)?)", normalized)
     if not matches:
         return 85000.0
-
-    multipliers = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
-    values = [float(number.replace(",", "")) * multipliers[suffix.lower()] for number, suffix in matches[:2]]
-    return sum(values) / len(values)
+    values = [float(number.replace(",", "")) for number in matches[:2]]
+    midpoint = sum(values) / len(values)
+    if normalized.endswith("/hr"):
+        midpoint *= 2080
+    return midpoint
 
 
 def entry_level_salary_benchmark(job_title: str) -> dict[str, int | str]:
@@ -148,7 +142,13 @@ def entry_level_salary_benchmark(job_title: str) -> dict[str, int | str]:
             (65000, 85000, "Software engineering, automation, and ML"),
         ),
         (
-            ("solutions engineer", "sales engineer", "pre sales", "presales", "customer success engineer"),
+            (
+                "solutions engineer",
+                "sales engineer",
+                "pre sales",
+                "presales",
+                "customer success engineer",
+            ),
             (70000, 90000, "Solutions, pre-sales, and customer engineering"),
         ),
         (
@@ -156,7 +156,14 @@ def entry_level_salary_benchmark(job_title: str) -> dict[str, int | str]:
             (65000, 85000, "Product and business operations"),
         ),
         (
-            ("consultant", "implementation", "systems analyst", "business analyst", "data analyst", "integration"),
+            (
+                "consultant",
+                "implementation",
+                "systems analyst",
+                "business analyst",
+                "data analyst",
+                "integration",
+            ),
             (60000, 80000, "Analysis, implementation, and consulting"),
         ),
         (
@@ -247,8 +254,7 @@ class IScoringDimension(ABC):
     """Abstract strategy interface for calculating an individual job score dimension."""
 
     @abstractmethod
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        pass
+    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float: ...
 
 
 class TitleMatchDimension(IScoringDimension):
@@ -278,7 +284,9 @@ def _cached_inventory(keywords: tuple[str, ...], resume_skills: tuple[str, ...])
     return frozenset(inventory)
 
 
-def _inventory_for(profile: UserProfile | dict[str, Any] | None) -> tuple[frozenset[str], tuple[str, ...]]:
+def _inventory_for(
+    profile: UserProfile | dict[str, Any] | None,
+) -> tuple[frozenset[str], tuple[str, ...]]:
     keywords = tuple(_profile_get(profile, "keywords", []) or [])
     resume_skills = tuple(_profile_get(profile, "resume_skills", []) or [])
     return _cached_inventory(keywords, resume_skills), keywords
@@ -309,7 +317,11 @@ class RemotePreferenceDimension(IScoringDimension):
     def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
         desc = normalize_text(job.get("description", ""))
         remote_st = normalize_text(job.get("remote_status", ""))
-        return 95.0 if (contains_any_term(remote_st, ("remote",)) or contains_any_term(desc, ("remote",))) else 80.0
+        return (
+            95.0
+            if (contains_any_term(remote_st, ("remote",)) or contains_any_term(desc, ("remote",)))
+            else 80.0
+        )
 
 
 class MontrealProximityDimension(IScoringDimension):
@@ -320,23 +332,52 @@ class MontrealProximityDimension(IScoringDimension):
 
 class CommutePreferenceDimension(IScoringDimension):
     FAR_COMMUTE_TERMS = (
-        "longueuil", "south shore", "north shore", "laval", "west island",
-        "40 min", "45 min", "50 min", "60 min",
-        "commute 40", "commute 45", "commute 50", "commute 60",
+        "longueuil",
+        "south shore",
+        "north shore",
+        "laval",
+        "west island",
+        "40 min",
+        "45 min",
+        "50 min",
+        "60 min",
+        "commute 40",
+        "commute 45",
+        "commute 50",
+        "commute 60",
     )
     TRANSIT_TERMS = (
-        "metro", "subway", "station", "downtown", "plateau", "verdun", "rosemont",
-        "mont royal", "bonaventure", "public transit", "transit", "near metro",
-        "close to metro", "accessible by metro", "easy commute", "30 min", "25 min", "20 min",
+        "metro",
+        "subway",
+        "station",
+        "downtown",
+        "plateau",
+        "verdun",
+        "rosemont",
+        "mont royal",
+        "bonaventure",
+        "public transit",
+        "transit",
+        "near metro",
+        "close to metro",
+        "accessible by metro",
+        "easy commute",
+        "30 min",
+        "25 min",
+        "20 min",
     )
 
     def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
         loc = normalize_text(job.get("location", ""))
         desc = normalize_text(job.get("description", ""))
 
-        if contains_any_term(loc, self.FAR_COMMUTE_TERMS) or contains_any_term(desc, self.FAR_COMMUTE_TERMS):
+        if contains_any_term(loc, self.FAR_COMMUTE_TERMS) or contains_any_term(
+            desc, self.FAR_COMMUTE_TERMS
+        ):
             return 72.0
-        if contains_any_term(loc, self.TRANSIT_TERMS) or contains_any_term(desc, self.TRANSIT_TERMS):
+        if contains_any_term(loc, self.TRANSIT_TERMS) or contains_any_term(
+            desc, self.TRANSIT_TERMS
+        ):
             return 92.0
         if contains_any_term(loc, ["montreal", "quebec", "qc"]):
             return 82.0
@@ -436,13 +477,53 @@ class CompositeScorer:
     # Not exhaustive - absence just means no bonus, it does not penalize the company.
     # Matched as whole words, so "ey" no longer matches Honeywell or Disney.
     KNOWN_ESTABLISHED_COMPANIES = (
-        "rbc", "royal bank", "td bank", "td canada trust", "scotiabank", "bmo",
-        "bank of montreal", "national bank", "desjardins", "cmls", "coveo", "sun life",
-        "manulife", "intact", "cgi", "cae", "bombardier", "air canada", "hydro quebec",
-        "loto quebec", "caisse de depot", "bell canada", "rogers", "telus", "videotron",
-        "shopify", "lightspeed", "nuvia", "nuvei", "ubisoft", "ericsson", "ibm",
-        "microsoft", "google", "amazon", "meta", "salesforce", "sap", "oracle", "cisco",
-        "deloitte", "pwc", "ey", "kpmg", "accenture", "loblaw", "metro inc",
+        "rbc",
+        "royal bank",
+        "td bank",
+        "td canada trust",
+        "scotiabank",
+        "bmo",
+        "bank of montreal",
+        "national bank",
+        "desjardins",
+        "cmls",
+        "coveo",
+        "sun life",
+        "manulife",
+        "intact",
+        "cgi",
+        "cae",
+        "bombardier",
+        "air canada",
+        "hydro quebec",
+        "loto quebec",
+        "caisse de depot",
+        "bell canada",
+        "rogers",
+        "telus",
+        "videotron",
+        "shopify",
+        "lightspeed",
+        "nuvia",
+        "nuvei",
+        "ubisoft",
+        "ericsson",
+        "ibm",
+        "microsoft",
+        "google",
+        "amazon",
+        "meta",
+        "salesforce",
+        "sap",
+        "oracle",
+        "cisco",
+        "deloitte",
+        "pwc",
+        "ey",
+        "kpmg",
+        "accenture",
+        "loblaw",
+        "metro inc",
         "canadian tire",
     )
 
@@ -492,7 +573,9 @@ class CompositeScorer:
         title_score = self.title_dim.evaluate(job_dict, self.profile)
         experience_score = self.exp_dim.evaluate(job_dict, self.profile)
         education_score = self.edu_dim.evaluate(job_dict, self.profile)
-        skill_score, skill_match, requirements, matcher = self.skill_dim.details(job_dict, self.profile)
+        skill_score, skill_match, requirements, matcher = self.skill_dim.details(
+            job_dict, self.profile
+        )
         salary_score = self.salary_dim.evaluate(job_dict, self.profile)
         remote_score = self.remote_dim.evaluate(job_dict, self.profile)
         prox_score = self.prox_dim.evaluate(job_dict, self.profile)
@@ -509,7 +592,8 @@ class CompositeScorer:
             (commute_score, "commute_preference_weight"),
         )
         total_weight = sum(
-            self._get_config_val(name, DEFAULT_SCORING_WEIGHTS[name]) for _, name in weighted_dimensions
+            self._get_config_val(name, DEFAULT_SCORING_WEIGHTS[name])
+            for _, name in weighted_dimensions
         )
         weighted_score = (
             sum(
@@ -534,7 +618,10 @@ class CompositeScorer:
             self._get_config_val("core_gap_penalty", 8.0) * len(skill_match.core_gaps),
         )
 
-        languages = {str(lang).lower() for lang in (_profile_get(self.profile, "languages", ["en"]) or ["en"])}
+        languages = {
+            str(lang).lower()
+            for lang in (_profile_get(self.profile, "languages", ["en"]) or ["en"])
+        }
         bilingual_bonus = 0.0
         language_penalty = 0.0
         if requirements.bilingual and {"en", "fr"} <= languages:
@@ -542,7 +629,9 @@ class CompositeScorer:
         if requirements.language == "fr" and "fr" not in languages:
             language_penalty = self._get_config_val("language_mismatch_penalty", 15.0)
 
-        feedback_adjustment = float(self.feedback.adjust(job_dict)) if self.feedback is not None else 0.0
+        feedback_adjustment = (
+            float(self.feedback.adjust(job_dict)) if self.feedback is not None else 0.0
+        )
 
         total = (
             weighted_score
@@ -557,6 +646,12 @@ class CompositeScorer:
             - language_penalty
         )
 
+        # Soft saturation: stacked bonuses on an already strong match used to clip at the
+        # cap, so several excellent postings tied at exactly 100. Above ``soft_cap`` the
+        # excess is compressed instead, which keeps the top of the ranking ordered.
+        soft_cap = self._get_config_val("soft_cap", 88.0)
+        if total > soft_cap:
+            total = soft_cap + (total - soft_cap) * 0.35
         max_score = self._get_config_val("max_score", 100.0)
         fit = max(0, min(max_score, round(total, 2)))
         interview_chance = max(0, min(100, round((fit * 0.75) + (skill_score * 0.25), 2)))
@@ -658,7 +753,13 @@ def title_match_score(job_title: str, profile: UserProfile | dict[str, Any] | No
         "qa automation",
     ]
     # General software engineering / coding roles
-    general_swe_terms = ["software engineer", "software developer", "engineer", "developer", "programmer"]
+    general_swe_terms = [
+        "software engineer",
+        "software developer",
+        "engineer",
+        "developer",
+        "programmer",
+    ]
     # Broader, less-picky fallback roles for a new grad. Scored well below actual
     # engineering/developer roles so analyst/business postings don't crowd out real
     # SWE/ML/automation matches. Whole-word matching: "bi" no longer matches "Bilingual".
@@ -683,7 +784,15 @@ def title_match_score(job_title: str, profile: UserProfile | dict[str, Any] | No
         "assurance",
     ]
     # Deprioritized: pure web/frontend roles (less interested in web dev)
-    web_only_terms = ["frontend", "front end", "front-end", "ui developer", "web designer", "wordpress", "shopify"]
+    web_only_terms = [
+        "frontend",
+        "front end",
+        "front-end",
+        "ui developer",
+        "web designer",
+        "wordpress",
+        "shopify",
+    ]
 
     if score < 100:
         if contains_any_term(text, coding_core_terms):
@@ -764,7 +873,8 @@ def skill_match_score(
     """
     dimension = SkillMatchDimension()
     score, _, _, _ = dimension.details(
-        {"title": title, "description": job_description}, profile if profile is not None else USER_PROFILE
+        {"title": title, "description": job_description},
+        profile if profile is not None else USER_PROFILE,
     )
     return int(round(score))
 

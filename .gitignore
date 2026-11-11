@@ -85,3 +85,14 @@ htmlcov/
 *~
 .DS_Store
 Thumbs.db
+
+# Packaging / private working folders
+private/
+dist/
+build/
+*.egg-info/
+jobhunter/.streamlit/secrets.toml
+
+# Local Streamlit config overrides (the checked-in jobhunter/.streamlit/config.toml
+# is a theme, not a secret — only secrets.toml is sensitive and ignored above)
+.streamlit/

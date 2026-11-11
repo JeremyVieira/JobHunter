@@ -13,19 +13,30 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-try:
-    from jobhunter.filter import MONTREAL_AREA_TERMS
-    from jobhunter.textutils import contains_any_term, normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from filter import MONTREAL_AREA_TERMS
-    from textutils import contains_any_term, normalize_text
+from jobhunter.filter import MONTREAL_AREA_TERMS
+from jobhunter.textutils import contains_any_term, normalize_text
 
 # Lower number = more authoritative copy of the posting.
 SOURCE_PRIORITY: dict[str, int] = {
-    "greenhouse": 0, "lever": 0, "ashby": 0, "workable": 0, "smartrecruiters": 0,
-    "recruitee": 0, "workday": 0, "company-career-page": 0,
-    "themuse": 1, "adzuna": 2, "jooble": 2, "remotive": 2, "jobicy": 2, "arbeitnow": 2,
-    "indeed": 3, "linkedin": 3, "zip_recruiter": 3, "glassdoor": 3, "google": 3,
+    "greenhouse": 0,
+    "lever": 0,
+    "ashby": 0,
+    "workable": 0,
+    "smartrecruiters": 0,
+    "recruitee": 0,
+    "workday": 0,
+    "company-career-page": 0,
+    "themuse": 1,
+    "adzuna": 2,
+    "jooble": 2,
+    "remotive": 2,
+    "jobicy": 2,
+    "arbeitnow": 2,
+    "indeed": 3,
+    "linkedin": 3,
+    "zip_recruiter": 3,
+    "glassdoor": 3,
+    "google": 3,
 }
 _COMPANY_SUFFIX = re.compile(r"\b(inc|ltd|ltee|limited|corp|corporation|llc|canada|group|co)\b")
 

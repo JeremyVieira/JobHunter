@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-try:
-    from jobhunter.matching.skills import get_matcher
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.skills import get_matcher
+from jobhunter.matching.skills import get_matcher
 
 
 def resume_skill_ids(*resume_paths: Path | str) -> list[str]:

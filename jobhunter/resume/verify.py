@@ -16,14 +16,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-try:
-    from jobhunter.matching.skills import get_matcher
-    from jobhunter.resume.tailoring import SECTION_HEADERS, strip_tags
-    from jobhunter.textutils import html_to_text, normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.skills import get_matcher
-    from resume.tailoring import SECTION_HEADERS, strip_tags
-    from textutils import html_to_text, normalize_text
+from jobhunter.matching.skills import get_matcher
+from jobhunter.resume.tailoring import SECTION_HEADERS, strip_tags
+from jobhunter.textutils import html_to_text, normalize_text
 
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?%?")
 
@@ -47,7 +42,9 @@ def verify_resume(
     """Lines in ``tailored_text`` that are not (a reordering of) master-resume lines."""
     master_lines = {_norm_line(line) for line in master_text.splitlines() if line.strip()}
     master_item_sets = {
-        _skill_items(line) for line in master_text.splitlines() if "," in line and line.strip().startswith("-")
+        _skill_items(line)
+        for line in master_text.splitlines()
+        if "," in line and line.strip().startswith("-")
     }
     extras = {" ".join(line.split()) for line in allowed_extra_lines}
     issues: list[str] = []

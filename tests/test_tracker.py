@@ -336,10 +336,22 @@ def test_get_top_jobs_excludes_applied_postings():
         db_module.get_connection = patched_get_connection
         try:
             ensure_database()
-            save_jobs([
-                {"title": "Applied Analyst", "company": "Company A", "url": "https://example.com/applied", "fit_score": 85},
-                {"title": "New Analyst", "company": "Company B", "url": "https://example.com/new", "fit_score": 80},
-            ])
+            save_jobs(
+                [
+                    {
+                        "title": "Applied Analyst",
+                        "company": "Company A",
+                        "url": "https://example.com/applied",
+                        "fit_score": 85,
+                    },
+                    {
+                        "title": "New Analyst",
+                        "company": "Company B",
+                        "url": "https://example.com/new",
+                        "fit_score": 80,
+                    },
+                ]
+            )
             save_application({"url": "https://example.com/applied", "status": "applied"})
 
             top_jobs = get_top_jobs()
@@ -371,7 +383,12 @@ def test_dismissed_posting_is_removed_and_not_reintroduced():
                 "url": "https://example.com/dismissed",
                 "fit_score": 85,
             }
-            new_job = {"title": "Data Analyst", "company": "Company B", "url": "https://example.com/new", "fit_score": 80}
+            new_job = {
+                "title": "Data Analyst",
+                "company": "Company B",
+                "url": "https://example.com/new",
+                "fit_score": 80,
+            }
             save_jobs([dismissed_job, new_job])
 
             dismiss_job(dismissed_job)
@@ -427,10 +444,11 @@ def test_dashboard_job_row_normalizes_to_dict():
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE jobs (id INTEGER, title TEXT, url TEXT)")
     conn.execute(
-        "CREATE TABLE jobs (id INTEGER, title TEXT, url TEXT)"
+        "INSERT INTO jobs (id, title, url) VALUES (?, ?, ?)",
+        (1, "Analyst", "https://example.com/job/1"),
     )
-    conn.execute("INSERT INTO jobs (id, title, url) VALUES (?, ?, ?)", (1, "Analyst", "https://example.com/job/1"))
     row = conn.execute("SELECT * FROM jobs WHERE id = 1").fetchone()
     conn.close()
 

@@ -9,7 +9,13 @@ from jobhunter.filter import (
 
 
 def _job(**kw):
-    base = {"title": "Business Analyst", "company": "Acme", "fit_score": 80, "location": "Montreal, QC", "description": "Analysis"}
+    base = {
+        "title": "Business Analyst",
+        "company": "Acme",
+        "fit_score": 80,
+        "location": "Montreal, QC",
+        "description": "Analysis",
+    }
     base.update(kw)
     return base
 
@@ -22,19 +28,29 @@ def test_missing_location_is_not_treated_as_remote():
 
 def test_missing_location_is_kept_when_the_posting_places_it_in_montreal():
     predicate = LocationAndRemotePredicate()
-    assert predicate.evaluate(_job(location="Unknown", description="Our Montréal office is hiring."))
+    assert predicate.evaluate(
+        _job(location="Unknown", description="Our Montréal office is hiring.")
+    )
 
 
 def test_us_only_remote_roles_are_rejected_but_canada_friendly_ones_kept():
-    us_only = _job(location="Remote", description="You must be authorized to work in the United States.")
+    us_only = _job(
+        location="Remote", description="You must be authorized to work in the United States."
+    )
     us_region = _job(location="Remote - US", description="Great role")
     canada = _job(location="Remote, Canada", description="Open to candidates across Canada")
     generic = _job(location="Remote", description="Remote role")
-    mixed = _job(location="Remote", description="US or Canada residents welcome; authorized to work in the US or Canada")
+    mixed = _job(
+        location="Remote",
+        description="US or Canada residents welcome; authorized to work in the US or Canada",
+    )
     assert remote_region_restricted(us_only) and remote_region_restricted(us_region)
     assert not remote_region_restricted(canada) and not remote_region_restricted(generic)
     assert not remote_region_restricted(mixed)
-    assert [j["location"] for j in filter_jobs([us_only, us_region, canada, generic])] == ["Remote, Canada", "Remote"]
+    assert [j["location"] for j in filter_jobs([us_only, us_region, canada, generic])] == [
+        "Remote, Canada",
+        "Remote",
+    ]
 
 
 def test_suburbs_of_greater_montreal_count_as_local():

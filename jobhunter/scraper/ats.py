@@ -19,51 +19,45 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
-try:
-    from jobhunter.config import settings as _settings
-    from jobhunter.filter import (
-        MONTREAL_AREA_TERMS,
-        _title_matches_target,
-        is_montreal_area_or_remote,
-    )
-    from jobhunter.scraper.collector import (
-        BaseScraper,
-        GreenhouseScraper,
-        LeverScraper,
-        ScraperFactory,
-        _polite_sleep,
-        _request_get,
-        _request_post,
-        is_excluded_title,
-        normalize_job,
-    )
-    from jobhunter.textutils import contains_any_term, normalize_text, parse_posting_date
-except ModuleNotFoundError:  # pragma: no cover
-    from config import settings as _settings
-    from filter import MONTREAL_AREA_TERMS, _title_matches_target, is_montreal_area_or_remote
-    from scraper.collector import (
-        BaseScraper,
-        GreenhouseScraper,
-        LeverScraper,
-        ScraperFactory,
-        _polite_sleep,
-        _request_get,
-        _request_post,
-        is_excluded_title,
-        normalize_job,
-    )
-    from textutils import contains_any_term, normalize_text, parse_posting_date
+from jobhunter.config import settings as _settings
+from jobhunter.filter import (
+    MONTREAL_AREA_TERMS,
+    _title_matches_target,
+    is_montreal_area_or_remote,
+)
+from jobhunter.scraper.collector import (
+    BaseScraper,
+    GreenhouseScraper,
+    LeverScraper,
+    ScraperFactory,
+    _polite_sleep,
+    _request_get,
+    _request_post,
+    is_excluded_title,
+    normalize_job,
+)
+from jobhunter.textutils import contains_any_term, normalize_text, parse_posting_date
 
 LOGGER = logging.getLogger(__name__)
 
 ASHBY_API = "https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true"
 WORKABLE_API = "https://apply.workable.com/api/v1/widget/accounts/{token}?details=true"
 SMARTRECRUITERS_LIST_API = "https://api.smartrecruiters.com/v1/companies/{token}/postings"
-SMARTRECRUITERS_DETAIL_API = "https://api.smartrecruiters.com/v1/companies/{token}/postings/{posting_id}"
+SMARTRECRUITERS_DETAIL_API = (
+    "https://api.smartrecruiters.com/v1/companies/{token}/postings/{posting_id}"
+)
 RECRUITEE_API = "https://{token}.recruitee.com/api/offers/"
 WORKDAY_BASE = "https://{tenant}.{dc}.myworkdayjobs.com"
 
-DEFAULT_WORKDAY_TERMS = ("software", "developer", "engineer", "data", "analyst", "python", "automation")
+DEFAULT_WORKDAY_TERMS = (
+    "software",
+    "developer",
+    "engineer",
+    "data",
+    "analyst",
+    "python",
+    "automation",
+)
 
 
 def _text(html: Any) -> str:
@@ -104,6 +98,12 @@ class _BoardScraper(BaseScraper):
         return []
 
     def scrape(self) -> list[dict[str, Any]]:
+        if not self.companies:
+            LOGGER.info(
+                "%s skipped: no boards configured (set the matching *_COMPANIES env var).",
+                self.source,
+            )
+            return []
         jobs: list[dict[str, Any]] = []
         for entry in self.companies:
             try:
@@ -148,7 +148,8 @@ class AshbyScraper(_BoardScraper):
                         "location": location,
                         "remote_status": "Remote" if is_remote else "On-site",
                         "salary": compensation.get("compensationTierSummary") or "Not disclosed",
-                        "description": item.get("descriptionPlain") or _text(item.get("descriptionHtml")),
+                        "description": item.get("descriptionPlain")
+                        or _text(item.get("descriptionHtml")),
                         "posting_date": str(item.get("publishedAt") or "Unknown")[:10],
                         "url": item.get("jobUrl") or item.get("applyUrl"),
                         "source": self.source,
@@ -172,7 +173,9 @@ class WorkableScraper(_BoardScraper):
         jobs = []
         for item in payload.get("jobs", []):
             location = ", ".join(
-                str(part).strip() for part in (item.get("city"), item.get("state"), item.get("country")) if part
+                str(part).strip()
+                for part in (item.get("city"), item.get("state"), item.get("country"))
+                if part
             )
             remote = bool(item.get("telecommuting"))
             if remote and not location:
@@ -185,8 +188,12 @@ class WorkableScraper(_BoardScraper):
                         "location": location or "Unknown",
                         "remote_status": "Remote" if remote else "On-site",
                         "description": _text(item.get("description")),
-                        "posting_date": str(item.get("published_on") or item.get("created_at") or "Unknown")[:10],
-                        "url": item.get("url") or item.get("shortlink") or item.get("application_url"),
+                        "posting_date": str(
+                            item.get("published_on") or item.get("created_at") or "Unknown"
+                        )[:10],
+                        "url": item.get("url")
+                        or item.get("shortlink")
+                        or item.get("application_url"),
                         "source": self.source,
                     }
                 )
@@ -245,11 +252,18 @@ class SmartRecruitersScraper(_BoardScraper):
                 sections = (detail.get("jobAd") or {}).get("sections") or {}
                 description = " ".join(
                     _text((sections.get(name) or {}).get("text"))
-                    for name in ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
+                    for name in (
+                        "companyDescription",
+                        "jobDescription",
+                        "qualifications",
+                        "additionalInformation",
+                    )
                 )
                 url = detail.get("postingUrl") or detail.get("applyUrl") or ""
             except Exception:
-                LOGGER.debug("SmartRecruiters detail failed for %s/%s", token, item.get("id"), exc_info=True)
+                LOGGER.debug(
+                    "SmartRecruiters detail failed for %s/%s", token, item.get("id"), exc_info=True
+                )
             if not url:
                 url = f"https://jobs.smartrecruiters.com/{token}/{item.get('id')}"
             jobs.append(
@@ -296,7 +310,9 @@ class RecruiteeScraper(_BoardScraper):
                         "location": location or "Unknown",
                         "remote_status": "Remote" if remote else "On-site",
                         "description": f"{_text(item.get('description'))} {_text(item.get('requirements'))}",
-                        "posting_date": str(item.get("published_at") or item.get("created_at") or "Unknown")[:10],
+                        "posting_date": str(
+                            item.get("published_at") or item.get("created_at") or "Unknown"
+                        )[:10],
                         "url": item.get("careers_url") or item.get("url"),
                         "source": self.source,
                     }
@@ -383,7 +399,10 @@ class WorkdayScraper(_BoardScraper):
             if not posted:
                 parsed = parse_posting_date(str(item.get("postedOn") or ""))
                 posted = parsed.isoformat() if parsed else "Unknown"
-            remote = "remote" in str(info.get("remoteType") or "").lower() or "remote" in location.lower()
+            remote = (
+                "remote" in str(info.get("remoteType") or "").lower()
+                or "remote" in location.lower()
+            )
             jobs.append(
                 normalize_job(
                     {
@@ -404,17 +423,38 @@ class WorkdayScraper(_BoardScraper):
 # --------------------------------------------------------------------------
 # Detecting a company's ATS from its careers page
 # --------------------------------------------------------------------------
-_RESERVED_TOKENS = {"embed", "careers", "jobs", "job", "api", "www", "static", "assets", "v1", "boards"}
+_RESERVED_TOKENS = {
+    "embed",
+    "careers",
+    "jobs",
+    "job",
+    "api",
+    "www",
+    "static",
+    "assets",
+    "v1",
+    "boards",
+}
 
 _ATS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("greenhouse", re.compile(r"(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/(?:embed/job_board(?:/js)?\?for=)?([A-Za-z0-9_-]+)")),
+    (
+        "greenhouse",
+        re.compile(
+            r"(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/(?:embed/job_board(?:/js)?\?for=)?([A-Za-z0-9_-]+)"
+        ),
+    ),
     ("greenhouse", re.compile(r"greenhouse\.io/embed/job_board(?:/js)?\?for=([A-Za-z0-9_-]+)")),
     ("lever", re.compile(r"jobs\.(?:eu\.)?lever\.co/([A-Za-z0-9_.-]+)")),
     ("ashby", re.compile(r"jobs\.ashbyhq\.com/([A-Za-z0-9_.-]+)")),
     ("workable", re.compile(r"apply\.workable\.com/([A-Za-z0-9_-]+)")),
     ("smartrecruiters", re.compile(r"(?:careers|jobs)\.smartrecruiters\.com/([A-Za-z0-9_-]+)")),
     ("recruitee", re.compile(r"([a-z0-9-]+)\.recruitee\.com")),
-    ("workday", re.compile(r"([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Za-z]{2}/)?([A-Za-z0-9_-]+)")),
+    (
+        "workday",
+        re.compile(
+            r"([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Za-z]{2}/)?([A-Za-z0-9_-]+)"
+        ),
+    ),
 )
 
 
@@ -435,7 +475,14 @@ def detect_ats(html: str, page_url: str = "") -> list[dict[str, Any]]:
                 if re.fullmatch(r"[a-z]{2}-[A-Za-z]{2}", site):
                     continue
                 key = f"{tenant}|{dc}|{site}"
-                entry = {"ats": ats, "token": tenant, "tenant": tenant, "dc": dc, "site": site, "key": key}
+                entry = {
+                    "ats": ats,
+                    "token": tenant,
+                    "tenant": tenant,
+                    "dc": dc,
+                    "site": site,
+                    "key": key,
+                }
             else:
                 token = match.group(1).rstrip(".")
                 if not token or token.lower() in _RESERVED_TOKENS:
@@ -467,7 +514,9 @@ def scrapers_for_detections(company: str, detections: list[dict[str, Any]]) -> l
             scrapers.append(RecruiteeScraper(companies=[(company, token)]))
         elif ats == "workday":
             scrapers.append(
-                WorkdayScraper(companies=[(company, detection["tenant"], detection["dc"], detection["site"])])
+                WorkdayScraper(
+                    companies=[(company, detection["tenant"], detection["dc"], detection["site"])]
+                )
             )
     return scrapers
 

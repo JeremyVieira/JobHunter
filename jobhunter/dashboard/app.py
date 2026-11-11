@@ -1,65 +1,40 @@
 from __future__ import annotations
 
+import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-# Ensure project root is in sys.path for direct Streamlit execution
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import streamlit as st  # noqa: E402
 
-try:
-    from jobhunter.app import run_daily_collection
-    from jobhunter.config.settings import USER_PROFILE
-    from jobhunter.resume.tailor import (
-        ats_analysis,
-        build_master_resume,
-        generate_application_pack,
-        get_application_pack_files,
-        read_verification_warnings,
-    )
-    from jobhunter.scoring.engine import salary_comparison
-    from jobhunter.tracker.db import (
-        ALL_STATUSES,
-        dismiss_job,
-        ensure_database,
-        funnel_stats,
-        get_connection,
-        get_job_stats,
-        get_top_jobs,
-        parse_match_details,
-        save_application,
-        update_application_status,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from app import run_daily_collection
-    from config.settings import USER_PROFILE
-    from resume.tailor import (
-        ats_analysis,
-        build_master_resume,
-        generate_application_pack,
-        get_application_pack_files,
-        read_verification_warnings,
-    )
-    from scoring.engine import salary_comparison
-    from tracker.db import (
-        ALL_STATUSES,
-        dismiss_job,
-        ensure_database,
-        funnel_stats,
-        get_connection,
-        get_job_stats,
-        get_top_jobs,
-        parse_match_details,
-        save_application,
-        update_application_status,
-    )
+from jobhunter import __version__
+from jobhunter.app import run_daily_collection
+from jobhunter.config.settings import USER_PROFILE
+from jobhunter.doctor import FAIL, OK, run_checks
+from jobhunter.matching.skills import label_for
+from jobhunter.resume.tailor import (
+    ats_analysis,
+    build_master_resume,
+    generate_application_pack,
+    get_application_pack_files,
+    read_verification_warnings,
+    suggest_languages,
+)
+from jobhunter.scoring.engine import salary_comparison
+from jobhunter.tracker.db import (
+    ALL_STATUSES,
+    dismiss_job,
+    ensure_database,
+    funnel_stats,
+    get_connection,
+    get_job_stats,
+    get_top_jobs,
+    parse_match_details,
+    save_application,
+    update_application_status,
+)
 
-st.set_page_config(page_title="JobHunterAI Dashboard", page_icon="💼", layout="wide")
+st.set_page_config(page_title="JobHunter", page_icon="💼", layout="wide")
 
 ensure_database()
 
@@ -73,20 +48,7 @@ def as_job_dict(job):
     return dict(job)
 
 
-def _read_download_file(value):
-    """Read a generated document only when its path points to a regular file."""
-    if not value:
-        return None
-    path = Path(str(value))
-    try:
-        if not path.is_file():
-            return None
-        return path, path.read_bytes()
-    except OSError:
-        return None
-
-
-_MARKDOWN_SPECIAL_CHARS = re.compile(r"([\\`*_{}\[\]()#+.!|>~-])")
+_MARKDOWN_SPECIAL_CHARS = re.compile(r"([\\`*_{}\[\]()#+.!|>~$-])")
 
 
 def _escape_markdown(value: str) -> str:
@@ -94,8 +56,24 @@ def _escape_markdown(value: str) -> str:
     return _MARKDOWN_SPECIAL_CHARS.sub(lambda match: "\\" + match.group(1), plain_text)
 
 
-st.title("💼 JobHunterAI Dashboard")
-st.caption(f"Intelligent Career & Job Opportunity Hub for {_escape_markdown(USER_PROFILE['name'])}")
+st.title("💼 JobHunter")
+if os.getenv("JOBHUNTER_DEMO") == "1":
+    st.info(
+        "Demo mode: every company, posting and person here is fictional, and nothing touches "
+        "your real data. Stop it with Ctrl+C and run `python -m jobhunter run` for the real thing."
+    )
+st.caption(
+    f"Your job search for {_escape_markdown(USER_PROFILE['name'])}: postings ranked by evidence, "
+    "and application documents that only use facts from your own resume."
+)
+
+_DEMO = os.getenv("JOBHUNTER_DEMO") == "1"
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _setup_checks() -> list[tuple[str, str, str, str]]:
+    return [(c.name, c.status, c.detail, c.fix) for c in run_checks()]
+
 
 # Sidebar
 with st.sidebar:
@@ -106,10 +84,8 @@ with st.sidebar:
     st.write(f"**Target Roles:** {len(USER_PROFILE['target_roles'])} defined")
 
     st.divider()
-    if st.button("🔄 Collect & Score Jobs Now", type="primary", use_container_width=True):
-        with st.spinner(
-            "Scraping boards, scoring, filtering & generating top application packs..."
-        ):
+    if st.button("🔄 Collect jobs now", type="primary", width="stretch"):
+        with st.spinner("Collecting from your sources, then scoring and filtering..."):
             collected = run_daily_collection()
             st.success(f"Collected and scored {len(collected)} matching opportunities!")
             st.rerun()
@@ -120,6 +96,27 @@ with st.sidebar:
         st.caption(f"• {role}")
     if len(USER_PROFILE["target_roles"]) > 8:
         st.caption(f"... and {len(USER_PROFILE['target_roles']) - 8} more")
+
+    if not _DEMO:
+        st.divider()
+        checks = _setup_checks()
+        to_review = [c for c in checks if c[1] != OK]
+        has_failure = any(c[1] == FAIL for c in checks)
+        label = "✅ Setup looks good" if not to_review else f"⚙️ Setup: {len(to_review)} to review"
+        with st.expander(label, expanded=has_failure):
+            icons = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
+            for name, status, detail, fix in checks:
+                st.markdown(
+                    f"{icons.get(status, '•')} **{_escape_markdown(name)}**: {_escape_markdown(detail)}"
+                )
+                if fix and status != OK:
+                    st.caption(f"→ {fix}")
+            st.caption("Same checks as `python -m jobhunter doctor`.")
+
+    st.divider()
+    st.caption(
+        f"JobHunter v{__version__} · local-first: your resume and tracker data stay on this machine."
+    )
 
 # Top Metrics
 stats = get_job_stats()
@@ -136,11 +133,46 @@ tab_jobs, tab_tracker, tab_profile = st.tabs(
 )
 
 with tab_jobs:
-    top_jobs = get_top_jobs(30)
-    if not top_jobs:
-        st.info(
-            "No jobs stored yet. Click 'Collect & Score Jobs Now' in the sidebar to start scraping."
+    stored_jobs = [as_job_dict(row) for row in get_top_jobs(200)]
+    top_jobs = stored_jobs
+    if stored_jobs:
+        f_search, f_fit, f_source, f_show = st.columns([2.2, 1.4, 1.8, 0.9])
+        query = f_search.text_input(
+            "Search", placeholder="Filter by title or company", label_visibility="collapsed"
         )
+        min_fit = f_fit.slider("Minimum fit", 0, 100, 0, help="Hide postings scoring below this.")
+        known_sources = sorted({str(j.get("source") or "unknown") for j in stored_jobs})
+        chosen_sources = f_source.multiselect(
+            "Sources",
+            known_sources,
+            default=known_sources,
+            label_visibility="collapsed",
+            placeholder="Sources",
+        )
+        limit = f_show.selectbox("Show", [10, 30, 60, 100], index=1, label_visibility="collapsed")
+        needle = query.strip().lower()
+        filtered = [
+            j
+            for j in stored_jobs
+            if float(j.get("fit_score") or 0) >= min_fit
+            and str(j.get("source") or "unknown") in chosen_sources
+            and (not needle or needle in f"{j.get('title', '')} {j.get('company', '')}".lower())
+        ]
+        top_jobs = filtered[:limit]
+        st.caption(
+            f"Showing {len(top_jobs)} of {len(filtered)} matching postings ({len(stored_jobs)} stored)."
+        )
+    if not stored_jobs:
+        st.markdown("### 👋 Welcome to JobHunter")
+        st.markdown(
+            "No postings yet. To get started:\n\n"
+            "1. Check the **Setup** panel in the sidebar and fix anything marked ❌.\n"
+            "2. Click **Collect jobs now** (the first run can take a few minutes).\n"
+            "3. Come back here: postings appear ranked, with a *Why this score* explanation.\n\n"
+            "Want to look around first? Run `python -m jobhunter demo` for a fully fictional workspace."
+        )
+    elif not top_jobs:
+        st.info("No postings match these filters. Lower the minimum fit or clear the search.")
     else:
         for idx, job in enumerate(top_jobs):
             job = as_job_dict(job)
@@ -151,11 +183,11 @@ with tab_jobs:
             company_name = job["company"]
             salary_market = salary_comparison(job["salary"], job_title)
 
-            # Inspect if application pack already exists (does NOT generate).
-            # Generate both English and French documents by default.
-            languages = ("en", "fr")
+            # Inspect if application pack already exists (does NOT generate)
+            # Generate only the language(s) the posting calls for (French posting -> French docs).
+            languages = suggest_languages(dict(job))
             pack = get_application_pack_files(dict(job), languages=languages)
-            docs_ready = bool(pack.get("complete"))
+            docs_ready = bool(pack.get("exists"))
             hook_key = f"hook_{job['id']}_{idx}"
 
             # Header row with title & action button
@@ -166,10 +198,16 @@ with tab_jobs:
                     f"**{_escape_markdown(company_name)}**"
                 )
                 st.caption(f"Fit: **{fit}%**")
-                st.text(
-                    f"Salary: {job['salary']} | Location: {job['location']} | "
-                    f"Work Model: {job['remote_status']}"
-                )
+                meta = [
+                    f"💰 {job['salary']}",
+                    f"📍 {job['location']}",
+                    f"🏠 {job['remote_status']}",
+                ]
+                if job.get("posting_date") and job["posting_date"] != "Unknown":
+                    meta.append(f"🗓 {job['posting_date']}")
+                if job.get("source"):
+                    meta.append(f"🔎 {job['source']}")
+                st.caption(_escape_markdown("  ·  ".join(meta)))
                 st.caption(
                     f"Typical entry-level CAD: **${salary_market['minimum']:,}-${salary_market['maximum']:,}** "
                     f"({salary_market['family']}) | **{salary_market['comparison']}**"
@@ -180,7 +218,7 @@ with tab_jobs:
                         "⚡ Generate CV & Resume",
                         key=f"quick_gen_{job['id']}_{idx}",
                         type="primary",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         with st.spinner("Tailoring documents..."):
                             generate_application_pack(
@@ -191,19 +229,20 @@ with tab_jobs:
                             st.success("Generated documents!")
                             st.rerun()
                 else:
-                    download = _read_download_file(pack.get("en_resume_pdf"))
-                    if download:
-                        en_pdf_path, en_pdf_data = download
+                    en_pdf_path = Path(str(pack.get("en_resume_pdf", "")))
+                    if en_pdf_path.exists():
                         st.download_button(
                             label="📥 Download Resume PDF",
-                            data=en_pdf_data,
+                            data=en_pdf_path.read_bytes(),
                             file_name=en_pdf_path.name,
                             mime="application/pdf",
                             key=f"quick_dl_{job['id']}_{idx}",
-                            use_container_width=True,
+                            width="stretch",
                         )
 
-            with st.expander("📄 View Application Pack, ATS Analysis & Job Details", expanded=False):
+            with st.expander(
+                "📄 View Application Pack, ATS Analysis & Job Details", expanded=False
+            ):
                 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                 m_col1.metric("Fit Score", f"{fit}%")
                 m_col2.metric(
@@ -233,14 +272,20 @@ with tab_jobs:
                     if skills.get("matched"):
                         st.write("**Skills you match:** " + ", ".join(skills["matched"]))
                     if skills.get("missing_required"):
-                        st.write("**Asked for, not on your record:** " + ", ".join(skills["missing_required"]))
+                        st.write(
+                            "**Asked for, not on your record:** "
+                            + ", ".join(skills["missing_required"])
+                        )
                     if skills.get("core_gaps"):
                         st.warning("Hard-stack gap: " + ", ".join(skills["core_gaps"]))
                     if details.get("years_required") is not None:
                         st.caption(f"Years of experience asked: {details['years_required']}")
                     notable = {k: v for k, v in adjustments.items() if v}
                     if notable:
-                        st.caption("Adjustments: " + ", ".join(f"{k.replace('_', ' ')} {v:+}" for k, v in notable.items()))
+                        st.caption(
+                            "Adjustments: "
+                            + ", ".join(f"{k.replace('_', ' ')} {v:+}" for k, v in notable.items())
+                        )
 
                 # Application Pack Section
                 st.markdown("#### 📂 Application Documents")
@@ -250,8 +295,14 @@ with tab_jobs:
                     placeholder="e.g. Why this company/team interests you, in one sentence",
                 )
                 if not (st.session_state.get(hook_key) or "").strip():
-                    st.caption("No company-specific line yet: the letter will be accurate but generic.")
-                st.caption("Documents for: " + ", ".join(languages) + " (chosen from the posting's language).")
+                    st.caption(
+                        "No company-specific line yet: the letter will be accurate but generic."
+                    )
+                st.caption(
+                    "Documents for: "
+                    + ", ".join(languages)
+                    + " (chosen from the posting's language)."
+                )
                 if not docs_ready:
                     st.info("Documents haven't been generated yet for this posting.")
                     if st.button(
@@ -271,17 +322,19 @@ with tab_jobs:
                             st.rerun()
                 else:
                     if not pack.get("complete"):
-                        st.warning("This application pack is incomplete. Available files remain downloadable below.")
+                        st.warning(
+                            "This application pack is incomplete. Available files remain downloadable below."
+                        )
                         if st.button(
                             "Regenerate incomplete pack",
                             key=f"complete_pack_{job['id']}_{idx}",
                         ):
                             with st.spinner("Completing application documents..."):
                                 generate_application_pack(
-                                dict(job),
-                                languages=languages,
-                                company_hook=st.session_state.get(hook_key, ""),
-                            )
+                                    dict(job),
+                                    languages=languages,
+                                    company_hook=st.session_state.get(hook_key, ""),
+                                )
                                 st.success("Application pack regenerated.")
                                 st.rerun()
                     doc_tab_en, doc_tab_fr = st.tabs(
@@ -290,92 +343,89 @@ with tab_jobs:
 
                     with doc_tab_en:
                         d_col1, d_col2, d_col3 = st.columns(3)
-                        en_pdf_download = _read_download_file(pack.get("en_resume_pdf"))
-                        en_docx_download = _read_download_file(pack.get("en_resume_docx"))
-                        en_cov_download = _read_download_file(pack.get("en_cover_letter_docx"))
+                        en_pdf = Path(str(pack.get("en_resume_pdf", "")))
+                        en_docx = Path(str(pack.get("en_resume_docx", "")))
+                        en_cov = Path(str(pack.get("en_cover_letter_docx", "")))
 
                         with d_col1:
-                            if en_pdf_download:
-                                en_pdf, en_pdf_data = en_pdf_download
+                            if en_pdf.exists():
                                 st.download_button(
                                     "📥 Resume (PDF)",
-                                    en_pdf_data,
+                                    en_pdf.read_bytes(),
                                     file_name=en_pdf.name,
                                     mime="application/pdf",
                                     key=f"en_pdf_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
                         with d_col2:
-                            if en_docx_download:
-                                en_docx, en_docx_data = en_docx_download
+                            if en_docx.exists():
                                 st.download_button(
                                     "📄 Resume (DOCX)",
-                                    en_docx_data,
+                                    en_docx.read_bytes(),
                                     file_name=en_docx.name,
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     key=f"en_docx_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
                         with d_col3:
-                            if en_cov_download:
-                                en_cov, en_cov_data = en_cov_download
+                            if en_cov.exists():
                                 st.download_button(
                                     "✉️ Cover Letter (DOCX)",
-                                    en_cov_data,
+                                    en_cov.read_bytes(),
                                     file_name=en_cov.name,
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     key=f"en_cov_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
 
                     with doc_tab_fr:
                         f_col1, f_col2, f_col3 = st.columns(3)
-                        fr_pdf_download = _read_download_file(pack.get("fr_resume_pdf"))
-                        fr_docx_download = _read_download_file(pack.get("fr_resume_docx"))
-                        fr_cov_download = _read_download_file(pack.get("fr_cover_letter_docx"))
+                        fr_pdf = Path(str(pack.get("fr_resume_pdf", "")))
+                        fr_docx = Path(str(pack.get("fr_resume_docx", "")))
+                        fr_cov = Path(str(pack.get("fr_cover_letter_docx", "")))
 
                         with f_col1:
-                            if fr_pdf_download:
-                                fr_pdf, fr_pdf_data = fr_pdf_download
+                            if fr_pdf.exists():
                                 st.download_button(
                                     "📥 CV Français (PDF)",
-                                    fr_pdf_data,
+                                    fr_pdf.read_bytes(),
                                     file_name=fr_pdf.name,
                                     mime="application/pdf",
                                     key=f"fr_pdf_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
                         with f_col2:
-                            if fr_docx_download:
-                                fr_docx, fr_docx_data = fr_docx_download
+                            if fr_docx.exists():
                                 st.download_button(
                                     "📄 CV Français (DOCX)",
-                                    fr_docx_data,
+                                    fr_docx.read_bytes(),
                                     file_name=fr_docx.name,
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     key=f"fr_docx_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
                         with f_col3:
-                            if fr_cov_download:
-                                fr_cov, fr_cov_data = fr_cov_download
+                            if fr_cov.exists():
                                 st.download_button(
                                     "✉️ Lettre de motivation (DOCX)",
-                                    fr_cov_data,
+                                    fr_cov.read_bytes(),
                                     file_name=fr_cov.name,
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     key=f"fr_cov_{job['id']}_{idx}",
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
 
                     warnings_list = read_verification_warnings(pack.get("verification_report"))
                     if warnings_list:
                         st.warning(
                             "Review before sending - generated text that is not directly from your "
-                            "master resume or the posting:\n\n" + "\n".join(f"- {w}" for w in warnings_list)
+                            "master resume or the posting:\n\n"
+                            + "\n".join(f"- {w}" for w in warnings_list)
                         )
                     else:
-                        st.caption("✅ Verified: resume lines come from your master resume; letter claims match your resume.")
+                        st.caption(
+                            "✅ Verified: resume lines come from your master resume; letter claims match your resume."
+                        )
 
                     # Regenerate Option
                     if st.button("🔄 Regenerate Application Pack", key=f"regen_{job['id']}_{idx}"):
@@ -395,11 +445,11 @@ with tab_jobs:
                 resume_text = build_master_resume("en")
                 analysis = ats_analysis(resume_text, job["description"])
                 st.write(f"**Keyword coverage estimate:** {analysis['ats_score']}%")
-                st.caption("Heuristic word overlap only; this is not a prediction of any employer's ATS result.")
+                st.caption(
+                    "Heuristic word overlap only; this is not a prediction of any employer's ATS result."
+                )
                 if analysis["missing_keywords"]:
-                    st.text(
-                        f"Keywords to highlight: {', '.join(analysis['missing_keywords'][:6])}"
-                    )
+                    st.text(f"Keywords to highlight: {', '.join(analysis['missing_keywords'][:6])}")
                 if analysis["missing_skills"]:
                     st.text(
                         f"Skills you have that this resume doesn't show: {', '.join(analysis['missing_skills'][:5])}"
@@ -413,9 +463,7 @@ with tab_jobs:
                 act_col1, act_col2, act_col3 = st.columns([3, 1, 1])
                 with act_col1:
                     if job["url"]:
-                        st.link_button(
-                            "🌐 Apply on Company Site", job["url"], use_container_width=True
-                        )
+                        st.link_button("🌐 Apply on Company Site", job["url"], width="stretch")
                 with act_col2:
                     if st.button("📌 Log as Applied", key=f"apply_{job['id']}_{idx}"):
                         save_application(
@@ -510,12 +558,33 @@ with tab_tracker:
                         for group, values in sorted(stats[key].items())
                     ]
                     st.markdown(f"**{label}**")
-                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                    st.dataframe(rows, width="stretch", hide_index=True)
                 if overall["responded"] + overall["ghosted"] < 10:
-                    st.caption("Too few recorded outcomes to draw conclusions yet - keep updating statuses.")
+                    st.caption(
+                        "Too few recorded outcomes to draw conclusions yet - keep updating statuses."
+                    )
     except Exception as err:
         st.warning(f"Could not load applications: {err}")
 
 with tab_profile:
-    st.subheader("⚙️ Active Search Criteria & Config")
-    st.json(USER_PROFILE)
+    st.subheader("⚙️ Active search criteria")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Target roles**")
+        st.write(", ".join(USER_PROFILE["target_roles"]) or "—")
+        st.markdown("**Priority roles** (score highest)")
+        st.write(", ".join(USER_PROFILE.get("priority_target_roles", [])) or "—")
+        st.markdown("**Languages**")
+        st.write(", ".join(str(lang).upper() for lang in USER_PROFILE.get("languages", [])) or "—")
+    with right:
+        st.markdown("**Skills you claim** (your keywords)")
+        st.write(", ".join(USER_PROFILE.get("keywords", [])) or "—")
+        detected = [label_for(skill) for skill in USER_PROFILE.get("resume_skills", [])]
+        st.markdown("**Skills detected in your master resume**")
+        st.write(", ".join(detected) or "None found. Add your master resume (see the Setup panel).")
+    st.caption(
+        "Edit these in `.env` (see docs/CONFIGURATION.md). A skill that is on neither list is never "
+        "claimed in generated documents."
+    )
+    with st.expander("Raw configuration"):
+        st.json(USER_PROFILE)

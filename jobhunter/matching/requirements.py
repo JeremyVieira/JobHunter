@@ -11,49 +11,83 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-try:
-    from jobhunter.matching.skills import (
-        PRIMARY_STACK,
-        RELATED_SKILLS,
-        SkillMatcher,
-        expand_inventory,
-        get_matcher,
-    )
-    from jobhunter.textutils import (
-        detect_language,
-        html_to_text,
-        mentions_bilingual,
-        normalize_text,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.skills import (
-        PRIMARY_STACK,
-        RELATED_SKILLS,
-        SkillMatcher,
-        expand_inventory,
-        get_matcher,
-    )
-    from textutils import detect_language, html_to_text, mentions_bilingual, normalize_text
+from jobhunter.matching.skills import (
+    PRIMARY_STACK,
+    RELATED_SKILLS,
+    SkillMatcher,
+    expand_inventory,
+    get_matcher,
+)
+from jobhunter.textutils import (
+    detect_language,
+    html_to_text,
+    mentions_bilingual,
+    normalize_text,
+)
 
 LEVEL_WEIGHTS = {"required": 1.0, "mentioned": 0.8, "preferred": 0.4}
 _LEVEL_RANK = {"preferred": 0, "mentioned": 1, "required": 2}
 
 _PREFERRED_CUES = (
-    "nice to have", "preferred", "bonus", "an asset", "asset", "a plus", "is a plus",
-    "would be a plus", "ideally", "familiarity with", "exposure to", "an advantage",
-    "atout", "est un atout", "un plus", "souhaite", "souhaitable", "idealement",
+    "nice to have",
+    "preferred",
+    "bonus",
+    "an asset",
+    "asset",
+    "a plus",
+    "is a plus",
+    "would be a plus",
+    "ideally",
+    "familiarity with",
+    "exposure to",
+    "an advantage",
+    "atout",
+    "est un atout",
+    "un plus",
+    "souhaite",
+    "souhaitable",
+    "idealement",
 )
 _REQUIRED_CUES = (
-    "required", "requirements", "must have", "must", "minimum", "essential",
-    "qualifications", "what you bring", "you have", "you will bring", "proficiency in",
-    "proficient", "strong knowledge", "exigences", "exige", "requis", "requise",
-    "profil recherche", "competences requises", "vous possedez", "vous avez",
-    "ce que vous apportez", "doit",
+    "required",
+    "requirements",
+    "must have",
+    "must",
+    "minimum",
+    "essential",
+    "qualifications",
+    "what you bring",
+    "you have",
+    "you will bring",
+    "proficiency in",
+    "proficient",
+    "strong knowledge",
+    "exigences",
+    "exige",
+    "requis",
+    "requise",
+    "profil recherche",
+    "competences requises",
+    "vous possedez",
+    "vous avez",
+    "ce que vous apportez",
+    "doit",
 )
 _NEUTRAL_HEADINGS = (
-    "responsibilities", "about", "benefits", "what you will do", "what you ll do",
-    "perks", "we offer", "why join", "our team", "responsabilites", "avantages",
-    "a propos", "ce que nous offrons", "your role",
+    "responsibilities",
+    "about",
+    "benefits",
+    "what you will do",
+    "what you ll do",
+    "perks",
+    "we offer",
+    "why join",
+    "our team",
+    "responsabilites",
+    "avantages",
+    "a propos",
+    "ce que nous offrons",
+    "your role",
 )
 
 _SENTENCE_SPLIT = re.compile(r"(?:\n+|(?<=[.!?;])\s+|\s*[•·▪●◦]\s*)")
@@ -107,8 +141,20 @@ _RANGE_RE = re.compile(
 )
 _SINGLE_RE = re.compile(r"(?<![\d.])(\d{1,2})\s*\+?\s*(?:years?|yrs?|ans)\b")
 _EXPERIENCE_WORDS = (
-    "experience", "expérience", "experiencia", "exp.", "minimum", "at least", "required",
-    "requires", "must have", "au moins", "exigé", "exigée", "of hands-on", "hands-on",
+    "experience",
+    "expérience",
+    "experiencia",
+    "exp.",
+    "minimum",
+    "at least",
+    "required",
+    "requires",
+    "must have",
+    "au moins",
+    "exigé",
+    "exigée",
+    "of hands-on",
+    "hands-on",
 )
 
 
@@ -126,7 +172,7 @@ def extract_required_years(description: str) -> int | None:
     consumed: list[tuple[int, int]] = []
 
     def window_has_experience(start: int, end: int) -> bool:
-        window = text[max(0, start - 60): end + 60]
+        window = text[max(0, start - 60) : end + 60]
         # "3+ years Java" states a requirement even without the word "experience"
         return "+" in text[start:end] or any(word in window for word in _EXPERIENCE_WORDS)
 
@@ -143,7 +189,10 @@ def extract_required_years(description: str) -> int | None:
             candidates.append(value)
     if candidates:
         return max(candidates)
-    if re.search(r"\bno (?:prior |previous )?(?:work )?experience (?:is )?(?:required|necessary|needed)", text):
+    if re.search(
+        r"\bno (?:prior |previous )?(?:work )?experience (?:is )?(?:required|necessary|needed)",
+        text,
+    ):
         return 0
     return None
 
@@ -152,10 +201,14 @@ def extract_required_years(description: str) -> int | None:
 # Posting analysis
 # --------------------------------------------------------------------------
 def _has_cue(normalized: str, cues: Iterable[str]) -> bool:
-    return any(re.search(r"(?<![a-z0-9])" + re.escape(cue) + r"(?![a-z0-9])", normalized) for cue in cues)
+    return any(
+        re.search(r"(?<![a-z0-9])" + re.escape(cue) + r"(?![a-z0-9])", normalized) for cue in cues
+    )
 
 
-def analyze_posting(title: str, description: str, matcher: SkillMatcher | None = None) -> PostingRequirements:
+def analyze_posting(
+    title: str, description: str, matcher: SkillMatcher | None = None
+) -> PostingRequirements:
     matcher = matcher or get_matcher()
     plain = description or ""
     # keep newlines for heading detection; only strip tags/markdown emphasis
@@ -224,16 +277,16 @@ def candidate_inventory(
         if found:
             inventory.update(found)
         else:
-            from_custom = [cid for cid, original in matcher.custom.items() if original == keyword.strip()]
+            from_custom = [
+                cid for cid, original in matcher.custom.items() if original == keyword.strip()
+            ]
             inventory.update(from_custom)
     if resume_text:
         inventory.update(matcher.extract(resume_text))
     return expand_inventory(inventory)
 
 
-def compare_requirements(
-    requirements: PostingRequirements, inventory: set[str]
-) -> SkillMatch:
+def compare_requirements(requirements: PostingRequirements, inventory: set[str]) -> SkillMatch:
     match = SkillMatch()
     weight_total = 0.0
     weight_have = 0.0

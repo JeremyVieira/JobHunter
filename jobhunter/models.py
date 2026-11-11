@@ -139,6 +139,7 @@ class ScoringRulesConfig:
     freshness_bonus: float = 3.0
     stale_penalty: float = 3.0
     entry_level_min_fit_score: float = 55.0
+    soft_cap: float = 88.0  # above this, extra points are compressed (keeps top ranks distinct)
     max_score: float = 100.0
 
     def to_dict(self) -> dict[str, Any]:

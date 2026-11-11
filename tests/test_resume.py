@@ -248,7 +248,9 @@ def _project_headings(resume: str) -> list[str]:
     """Heading lines inside the PROJECTS section of a rendered resume."""
     lines = resume.splitlines()
     start = lines.index("PROJECTS") + 1
-    end = next((i for i in range(start, len(lines)) if lines[i] in tailor.SECTION_HEADERS), len(lines))
+    end = next(
+        (i for i in range(start, len(lines)) if lines[i] in tailor.SECTION_HEADERS), len(lines)
+    )
     return [line for line in lines[start:end] if line.strip() and not line.startswith("-")]
 
 
@@ -328,7 +330,12 @@ def test_skill_groups_and_items_are_reordered_without_changing_membership():
     skills_start = lines.index("TECHNICAL SKILLS") + 1
     assert lines[skills_start] == "Support & Collaboration"
     master_items = {"python", "sql", "git", "requirements gathering"}
-    all_items = {item.strip().lower() for line in lines[skills_start:] if line.startswith("-") for item in line[1:].split(",")}
+    all_items = {
+        item.strip().lower()
+        for line in lines[skills_start:]
+        if line.startswith("-")
+        for item in line[1:].split(",")
+    }
     assert master_items <= all_items
 
 
@@ -356,7 +363,9 @@ def test_explicit_bullet_tags_drive_ranking_and_are_never_rendered():
         "- Wrote internal tooling for the team [tags: kubernetes, helm]\n"
         "- Answered support tickets\n"
     )
-    tailored = tailoring_module.tailor_resume_text(resume_text, "Platform Engineer", "Kubernetes operations", "en", variants={})
+    tailored = tailoring_module.tailor_resume_text(
+        resume_text, "Platform Engineer", "Kubernetes operations", "en", variants={}
+    )
     assert "[tags" not in tailored
     bullets = [line for line in tailored.splitlines() if line.startswith("-")]
     assert bullets[0].startswith("- Wrote internal tooling")
@@ -405,7 +414,9 @@ def test_tailor_resume_in_french_keeps_general_summary_and_adapts_projects():
 
 def test_generate_cover_letter():
     letter = generate_cover_letter(
-        "Business Analyst", "Bell Canada", "SQL, requirements gathering and stakeholder communication."
+        "Business Analyst",
+        "Bell Canada",
+        "SQL, requirements gathering and stakeholder communication.",
     )
     assert "Bell Canada" in letter
     assert "Business Analyst" in letter
@@ -470,7 +481,9 @@ def test_generate_french_cover_letter():
 def test_cover_letter_includes_company_hook_only_when_supplied():
     without = generate_cover_letter("Python Developer", "Acme", "Python and SQL")
     hook = "I admire how Acme builds logistics software for small shippers."
-    with_hook = generate_cover_letter("Python Developer", "Acme", "Python and SQL", company_hook=hook)
+    with_hook = generate_cover_letter(
+        "Python Developer", "Acme", "Python and SQL", company_hook=hook
+    )
     assert hook not in without
     assert hook in with_hook
 
@@ -491,7 +504,9 @@ def test_cover_letter_states_unmet_core_requirement_honestly():
 
 
 def test_cover_letter_mentions_bilingual_ability_only_for_bilingual_postings():
-    bilingual = generate_cover_letter("Developer", "Acme", "Python. Bilingual English and French required.")
+    bilingual = generate_cover_letter(
+        "Developer", "Acme", "Python. Bilingual English and French required."
+    )
     unilingual = generate_cover_letter("Developer", "Acme", "Python developer role.")
     assert "fluent in both English and French" in bilingual
     assert "English and French" not in unilingual

@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /jobhunter
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # python-jobspy pins NumPy 1.26, and pyarrow 24+ needs NumPy 2. Upgrade these two
+      # together by hand (see the comment in requirements.txt).
+      - dependency-name: pyarrow
+        update-types: ["version-update:semver-major"]
+      - dependency-name: numpy
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
