@@ -7,21 +7,22 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
 
-try:
-    from jobhunter.config.settings import DB_PATH
-    from jobhunter.filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
-    from jobhunter.models import ApplicationRecord, JobListing
-    from jobhunter.scraper.dedupe import identity
-except ModuleNotFoundError:  # pragma: no cover
-    from config.settings import DB_PATH
-    from filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
-    from models import ApplicationRecord, JobListing
-    from scraper.dedupe import identity
-
+from jobhunter.config.settings import DB_PATH
+from jobhunter.filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
+from jobhunter.models import ApplicationRecord, JobListing
+from jobhunter.scraper.dedupe import identity
 
 # Application lifecycle. Anything past "saved" means the posting has been acted on and
 # must stay hidden from the "new opportunities" lists (not just status == "applied").
-APPLIED_STATUSES = ("applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn")
+APPLIED_STATUSES = (
+    "applied",
+    "screening",
+    "interview",
+    "offer",
+    "rejected",
+    "ghosted",
+    "withdrawn",
+)
 RESPONDED_STATUSES = ("screening", "interview", "offer", "rejected")
 INTERVIEW_STATUSES = ("interview", "offer")
 ALL_STATUSES = ("saved", *APPLIED_STATUSES)
@@ -226,18 +227,6 @@ class SQLiteJobRepository:
                 DELETE FROM jobs
                 WHERE LOWER(COALESCE(company, '')) = 'unknown'
                    OR LOWER(COALESCE(title, '')) IN ('manual entry', 'generic role', 'unknown role')
-                         OR LOWER(COALESCE(title, '')) LIKE '%project coordinator%'
-                         OR LOWER(COALESCE(title, '')) LIKE '%technical coordinator%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%senior%'
-                           OR LOWER(COALESCE(title, '')) LIKE 'sr %'
-                           OR LOWER(COALESCE(title, '')) LIKE 'sr.%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%lead%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%principal%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%staff%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%manager%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%director%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%gestionnaire%'
-                           OR LOWER(COALESCE(title, '')) LIKE '%directeur%'
                    OR COALESCE(url, '') = ''
                    OR LOWER(COALESCE(source, '')) = 'demo'
                 """
@@ -268,9 +257,7 @@ class SQLiteJobRepository:
         try:
             rows = conn.execute("SELECT url, location FROM jobs").fetchall()
             bad_urls = [
-                row["url"]
-                for row in rows
-                if not is_montreal_area_or_remote(row["location"] or "")
+                row["url"] for row in rows if not is_montreal_area_or_remote(row["location"] or "")
             ]
             if not bad_urls:
                 return 0
@@ -279,6 +266,7 @@ class SQLiteJobRepository:
             return len(bad_urls)
         finally:
             conn.close()
+
     def reset_jobs(self) -> int:
         """Wipe every row from the `jobs` table (found/scored postings) while
         leaving `applications` and `dismissed_jobs` untouched.
@@ -687,7 +675,7 @@ def get_applied_urls() -> set[str]:
     conn = get_connection()
     try:
         rows = conn.execute(
-                        """SELECT DISTINCT url FROM applications
+            """SELECT DISTINCT url FROM applications
                              WHERE url IS NOT NULL AND TRIM(url) != ''
                                  AND LOWER(COALESCE(status, '')) IN ('applied', 'screening', 'interview', 'offer', 'rejected', 'ghosted', 'withdrawn')"""
         ).fetchall()

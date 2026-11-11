@@ -21,7 +21,14 @@ def repos(tmp_path):
 
 
 def _app(**kw):
-    base = {"company": "Acme", "role": "Developer", "fit_score": 82, "status": "applied", "url": "https://x/1", "source": "linkedin"}
+    base = {
+        "company": "Acme",
+        "role": "Developer",
+        "fit_score": 82,
+        "status": "applied",
+        "url": "https://x/1",
+        "source": "linkedin",
+    }
     base.update(kw)
     return base
 
@@ -46,7 +53,18 @@ def test_unknown_status_is_rejected_and_missing_application_returns_false(repos)
 def test_all_progressed_statuses_still_hide_the_job_from_new_lists(repos):
     jobs, apps = repos
     url = "https://x/hidden"
-    jobs.save_many([{"title": "Dev", "company": "Acme", "location": "Montreal, QC", "description": "x" * 120, "url": url, "fit_score": 80}])
+    jobs.save_many(
+        [
+            {
+                "title": "Dev",
+                "company": "Acme",
+                "location": "Montreal, QC",
+                "description": "x" * 120,
+                "url": url,
+                "fit_score": 80,
+            }
+        ]
+    )
     assert any(r["url"] == url for r in jobs.find_recent(10))
     app_id = apps.save(_app(url=url))
     for status in APPLIED_STATUSES:
@@ -57,14 +75,50 @@ def test_all_progressed_statuses_still_hide_the_job_from_new_lists(repos):
 
 def test_funnel_by_band_source_and_language():
     rows = [
-        {"status": "interview", "fit_score": 91, "source": "ashby", "language": "en", "interview_date": None},
-        {"status": "rejected", "fit_score": 85, "source": "linkedin", "language": "en", "interview_date": None},
-        {"status": "ghosted", "fit_score": 72, "source": "linkedin", "language": "fr", "interview_date": None},
-        {"status": "applied", "fit_score": 64, "source": "indeed", "language": "fr", "interview_date": None},
-        {"status": "offer", "fit_score": 95, "source": "ashby", "language": "en", "interview_date": "2026-11-01"},
+        {
+            "status": "interview",
+            "fit_score": 91,
+            "source": "ashby",
+            "language": "en",
+            "interview_date": None,
+        },
+        {
+            "status": "rejected",
+            "fit_score": 85,
+            "source": "linkedin",
+            "language": "en",
+            "interview_date": None,
+        },
+        {
+            "status": "ghosted",
+            "fit_score": 72,
+            "source": "linkedin",
+            "language": "fr",
+            "interview_date": None,
+        },
+        {
+            "status": "applied",
+            "fit_score": 64,
+            "source": "indeed",
+            "language": "fr",
+            "interview_date": None,
+        },
+        {
+            "status": "offer",
+            "fit_score": 95,
+            "source": "ashby",
+            "language": "en",
+            "interview_date": "2026-11-01",
+        },
     ]
     stats = compute_funnel(rows)
-    assert stats["overall"] == {"applied": 5, "responded": 3, "interviews": 2, "offers": 1, "ghosted": 1}
+    assert stats["overall"] == {
+        "applied": 5,
+        "responded": 3,
+        "interviews": 2,
+        "offers": 1,
+        "ghosted": 1,
+    }
     assert stats["by_band"]["90-100"]["interviews"] == 2
     assert stats["by_source"]["linkedin"]["applied"] == 2
     assert stats["by_language"]["fr"]["ghosted"] == 1
@@ -73,7 +127,19 @@ def test_funnel_by_band_source_and_language():
 def test_funnel_rows_join_source_and_score_from_the_jobs_table(repos):
     jobs, apps = repos
     url = "https://x/joined"
-    jobs.save_many([{"title": "Dev", "company": "Acme", "location": "Montreal, QC", "description": "x" * 120, "url": url, "fit_score": 77, "source": "workday"}])
+    jobs.save_many(
+        [
+            {
+                "title": "Dev",
+                "company": "Acme",
+                "location": "Montreal, QC",
+                "description": "x" * 120,
+                "url": url,
+                "fit_score": 77,
+                "source": "workday",
+            }
+        ]
+    )
     apps.save({"company": "Acme", "role": "Dev", "status": "applied", "url": url})
     row = apps.funnel_rows()[0]
     assert row["source"] == "workday" and row["fit_score"] == 77
@@ -97,7 +163,19 @@ def test_feedback_examples_and_seen_identities(repos):
 def test_match_details_round_trip_through_the_jobs_table(repos):
     jobs, _ = repos
     details = {"skills": {"matched": ["Python"]}, "years_required": 2}
-    jobs.save_many([{"title": "Dev", "company": "Acme", "location": "Montreal, QC", "description": "x" * 120, "url": "https://x/m", "fit_score": 80, "match_details": details}])
+    jobs.save_many(
+        [
+            {
+                "title": "Dev",
+                "company": "Acme",
+                "location": "Montreal, QC",
+                "description": "x" * 120,
+                "url": "https://x/m",
+                "fit_score": 80,
+                "match_details": details,
+            }
+        ]
+    )
     row = jobs.find_top(5)[0]
     assert parse_match_details(row["match_details"]) == details
     assert parse_match_details(None) == {} and parse_match_details("not json") == {}

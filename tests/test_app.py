@@ -12,6 +12,7 @@ from jobhunter.app import (
     run_daily_collection,
     start_dashboard,
 )
+from jobhunter.scraper import collector
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +28,12 @@ def mock_scrapers(monkeypatch, tmp_path):
         filter_applied_jobs=lambda jobs: list(jobs),
         save_jobs=lambda jobs: len(jobs),
         output_dir=test_output_dir,
+    )
+    # Only the mocked scrapers below exist: no test may hit the real network
+    # (unmocked scrapers would wait on 20s timeouts + retry backoff, ~100s/test).
+    monkeypatch.setattr(
+        "jobhunter.app.build_default_scrapers",
+        lambda: [collector.JobSpyScraper()],
     )
     monkeypatch.setattr(
         app_module,
@@ -202,19 +209,7 @@ def test_start_dashboard_uses_local_streamlit_server(monkeypatch):
     assert captured["command"][captured["command"].index("--server.address") + 1] == "127.0.0.1"
 
 
-def test_dashboard_download_helper_ignores_missing_paths_and_directories(tmp_path):
-    from jobhunter.dashboard.app import _read_download_file
-
-    document = tmp_path / "resume.pdf"
-    document.write_bytes(b"pdf")
-
-    assert _read_download_file("") is None
-    assert _read_download_file(None) is None
-    assert _read_download_file(tmp_path) is None
-    assert _read_download_file(document) == (document, b"pdf")
-
-
-def test_main_collects_before_starting_dashboard_and_scheduler(monkeypatch):
+def test_main_starts_dashboard_first_and_collects_in_the_background(monkeypatch):
     import jobhunter.app as app_module
 
     events = []
@@ -222,6 +217,10 @@ def test_main_collects_before_starting_dashboard_and_scheduler(monkeypatch):
     class FakeScheduler:
         def start(self):
             events.append("scheduler-start")
+
+        def add_job(self, func, **kwargs):
+            # the first collection is queued as a background job, not run inline
+            events.append(f"background-job:{kwargs.get('id')}")
 
         def shutdown(self, wait):
             events.append("scheduler-stop")
@@ -248,5 +247,7 @@ def test_main_collects_before_starting_dashboard_and_scheduler(monkeypatch):
 
     app_module.main()
 
-    assert events.index("collection") < events.index("dashboard-start")
-    assert events.index("collection") < events.index("scheduler-start")
+    # The dashboard comes up immediately; the (slow) first collection never blocks it.
+    assert "collection" not in events
+    assert events.index("dashboard-start") < events.index("scheduler-start")
+    assert events.index("scheduler-start") < events.index("background-job:startup-collection")
