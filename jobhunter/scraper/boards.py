@@ -15,32 +15,18 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-try:
-    from jobhunter.config import settings as _settings
-    from jobhunter.scraper.collector import (
-        DEFAULT_SEARCH_TERMS,
-        JOB_SEARCH_LOCATION,
-        JOB_SEARCH_TERMS,
-        BaseScraper,
-        ScraperFactory,
-        _polite_sleep,
-        _request_get,
-        _request_post,
-        normalize_job,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from config import settings as _settings
-    from scraper.collector import (
-        DEFAULT_SEARCH_TERMS,
-        JOB_SEARCH_LOCATION,
-        JOB_SEARCH_TERMS,
-        BaseScraper,
-        ScraperFactory,
-        _polite_sleep,
-        _request_get,
-        _request_post,
-        normalize_job,
-    )
+from jobhunter.config import settings as _settings
+from jobhunter.scraper.collector import (
+    DEFAULT_SEARCH_TERMS,
+    JOB_SEARCH_LOCATION,
+    JOB_SEARCH_TERMS,
+    BaseScraper,
+    ScraperFactory,
+    _polite_sleep,
+    _request_get,
+    _request_post,
+    normalize_job,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +58,9 @@ class TheMuseScraper(BaseScraper):
         self.location = location
         self.levels = levels
         self.timeout = timeout
-        self.enabled = bool(getattr(_settings, "MUSE_ENABLED", True)) if enabled is None else enabled
+        self.enabled = (
+            bool(getattr(_settings, "MUSE_ENABLED", True)) if enabled is None else enabled
+        )
 
     def scrape(self) -> list[dict[str, Any]]:
         if not self.enabled:
@@ -81,19 +69,32 @@ class TheMuseScraper(BaseScraper):
         for page in range(1, self.MAX_PAGES + 1):
             payload = _request_get(
                 MUSE_API,
-                params=[("page", page), ("location", self.location), *[("level", lvl) for lvl in self.levels]],
+                params=[
+                    ("page", page),
+                    ("location", self.location),
+                    *[("level", lvl) for lvl in self.levels],
+                ],
                 timeout=self.timeout,
             ).json()
             for item in payload.get("results", []):
-                locations = [str(loc.get("name") or "") for loc in item.get("locations") or [] if isinstance(loc, dict)]
-                location = next((loc for loc in locations if "montr" in loc.lower()), locations[0] if locations else "")
+                locations = [
+                    str(loc.get("name") or "")
+                    for loc in item.get("locations") or []
+                    if isinstance(loc, dict)
+                ]
+                location = next(
+                    (loc for loc in locations if "montr" in loc.lower()),
+                    locations[0] if locations else "",
+                )
                 jobs.append(
                     normalize_job(
                         {
                             "title": item.get("name"),
                             "company": (item.get("company") or {}).get("name"),
                             "location": location or "Unknown",
-                            "remote_status": "Remote" if "flexible" in location.lower() or "remote" in location.lower() else "On-site",
+                            "remote_status": "Remote"
+                            if "flexible" in location.lower() or "remote" in location.lower()
+                            else "On-site",
                             "description": _text(item.get("contents")),
                             "posting_date": str(item.get("publication_date") or "Unknown")[:10],
                             "url": (item.get("refs") or {}).get("landing_page"),
@@ -248,7 +249,9 @@ class RssFeedScraper(BaseScraper):
                         "company": company or feed_name,
                         "location": location_tag.get_text(strip=True) if location_tag else "",
                         "description": _text(body.get_text() if body else ""),
-                        "posting_date": (date_tag.get_text(strip=True) if date_tag else "Unknown")[:25],
+                        "posting_date": (date_tag.get_text(strip=True) if date_tag else "Unknown")[
+                            :25
+                        ],
                         "url": link,
                         "source": f"rss:{feed_name}",
                     }

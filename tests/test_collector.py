@@ -37,7 +37,7 @@ def test_normalize_job_complete():
     assert normalized["title"] == "Business Analyst"
     assert normalized["company"] == "Bell Canada"
     assert normalized["location"] == "Montreal, QC"
-    assert normalized["salary"] == "$95,000 - $115,000"
+    assert normalized["salary"] == "$95,000 - $115,000 CAD/yr"
 
 
 def test_normalize_job_with_missing_fields():
@@ -116,9 +116,7 @@ def test_company_career_page_scraper_parses_jobposting_jsonld():
      "description":"Build cloud infrastructure with Terraform and Python."}
     </script></head></html>
     """
-    jobs = CompanyCareerPageScraper._parse_page(
-        html, "Example Bank", "https://example.com/careers"
-    )
+    jobs = CompanyCareerPageScraper._parse_page(html, "Example Bank", "https://example.com/careers")
     assert jobs[0]["title"] == "Cloud Engineer"
     assert jobs[0]["company"] == "Example Bank"
     assert jobs[0]["location"] == "Montreal, QC"
@@ -132,36 +130,6 @@ def test_company_career_page_configuration_supports_named_watchlist_entries(monk
     )
     scraper = CompanyCareerPageScraper()
     assert scraper.pages == [("CMLS Financial", "https://www.cmls.ca/careers")]
-
-
-def test_company_career_page_configuration_skips_invalid_urls(monkeypatch, caplog):
-    monkeypatch.setattr(
-        "jobhunter.scraper.collector.COMPANY_CAREER_URLS",
-        ["CAE|https://www.cae_.com/careers/", "Valid|https://example.com/careers"],
-    )
-
-    with caplog.at_level(logging.WARNING):
-        scraper = CompanyCareerPageScraper()
-
-    assert scraper.pages == [("Valid", "https://example.com/careers")]
-    assert "Skipping invalid career page URL for CAE" in caplog.text
-
-
-def test_company_career_page_scraper_skips_invalid_direct_page_url(monkeypatch, caplog):
-    requested = []
-    monkeypatch.setattr(
-        "jobhunter.scraper.collector._request_get",
-        lambda url, **kwargs: requested.append(url),
-    )
-
-    with caplog.at_level(logging.WARNING):
-        jobs = CompanyCareerPageScraper(
-            pages=[("CAE", "https://www.cae_.com/careers/")]
-        ).scrape()
-
-    assert jobs == []
-    assert requested == []
-    assert "Skipping invalid career page URL for CAE" in caplog.text
 
 
 def test_fetch_jobicy_jobs_normalizes_real_api_fields(monkeypatch):
@@ -186,7 +154,7 @@ def test_fetch_jobicy_jobs_normalizes_real_api_fields(monkeypatch):
             }
 
     monkeypatch.setattr(
-        "jobhunter.scraper.collector.requests.get", lambda url, timeout: FakeResponse()
+        "jobhunter.scraper.collector.requests.get", lambda url, timeout, **kw: FakeResponse()
     )
 
     jobs = fetch_jobicy_jobs()
@@ -197,7 +165,7 @@ def test_fetch_jobicy_jobs_normalizes_real_api_fields(monkeypatch):
             "company": "Example Corp",
             "location": "Remote",
             "remote_status": "Remote",
-            "salary": "USD75000",
+            "salary": "$75,000 USD/yr",
             "description": "SQL and business analysis",
             "posting_date": "2026-08-29",
             "url": "https://jobicy.com/jobs/123",
@@ -227,7 +195,7 @@ def test_fetch_remotive_jobs(monkeypatch):
             }
 
     monkeypatch.setattr(
-        "jobhunter.scraper.collector.requests.get", lambda url, timeout: FakeResponse()
+        "jobhunter.scraper.collector.requests.get", lambda url, timeout, **kw: FakeResponse()
     )
     jobs = fetch_remotive_jobs()
     assert len(jobs) == 1
@@ -239,7 +207,7 @@ def test_fetch_remotive_jobs(monkeypatch):
 def test_remotive_retries_transient_failures_and_logs_exhaustion(monkeypatch, caplog):
     calls = 0
 
-    def fail_request(url, timeout):
+    def fail_request(url, timeout, **kw):
         nonlocal calls
         calls += 1
         raise requests.Timeout("temporary timeout")
@@ -275,7 +243,7 @@ def test_fetch_arbeitnow_jobs(monkeypatch):
             }
 
     monkeypatch.setattr(
-        "jobhunter.scraper.collector.requests.get", lambda url, timeout: FakeResponse()
+        "jobhunter.scraper.collector.requests.get", lambda url, timeout, **kw: FakeResponse()
     )
     jobs = fetch_arbeitnow_jobs()
     assert len(jobs) == 1

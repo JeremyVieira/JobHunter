@@ -4,51 +4,30 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from jobhunter.config import settings as _settings
-    from jobhunter.scraper.ats import (
-        AshbyScraper,
-        RecruiteeScraper,
-        SmartRecruitersScraper,
-        WorkableScraper,
-        WorkdayScraper,
-    )
-    from jobhunter.scraper.boards import (
-        AdzunaScraper,
-        JoobleScraper,
-        RssFeedScraper,
-        TheMuseScraper,
-    )
-    from jobhunter.scraper.collector import (
-        ArbeitnowScraper,
-        BaseScraper,
-        CompanyCareerPageScraper,
-        GreenhouseScraper,
-        JobicyScraper,
-        JobSpyScraper,
-        LeverScraper,
-        RemotiveScraper,
-    )
-except ModuleNotFoundError:  # pragma: no cover
-    from config import settings as _settings
-    from scraper.ats import (
-        AshbyScraper,
-        RecruiteeScraper,
-        SmartRecruitersScraper,
-        WorkableScraper,
-        WorkdayScraper,
-    )
-    from scraper.boards import AdzunaScraper, JoobleScraper, RssFeedScraper, TheMuseScraper
-    from scraper.collector import (
-        ArbeitnowScraper,
-        BaseScraper,
-        CompanyCareerPageScraper,
-        GreenhouseScraper,
-        JobicyScraper,
-        JobSpyScraper,
-        LeverScraper,
-        RemotiveScraper,
-    )
+from jobhunter.config import settings as _settings
+from jobhunter.scraper.ats import (
+    AshbyScraper,
+    RecruiteeScraper,
+    SmartRecruitersScraper,
+    WorkableScraper,
+    WorkdayScraper,
+)
+from jobhunter.scraper.boards import (
+    AdzunaScraper,
+    JoobleScraper,
+    RssFeedScraper,
+    TheMuseScraper,
+)
+from jobhunter.scraper.collector import (
+    ArbeitnowScraper,
+    BaseScraper,
+    CompanyCareerPageScraper,
+    GreenhouseScraper,
+    JobicyScraper,
+    JobSpyScraper,
+    LeverScraper,
+    RemotiveScraper,
+)
 
 
 def build_default_scrapers() -> list[BaseScraper]:

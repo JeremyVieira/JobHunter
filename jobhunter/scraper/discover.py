@@ -13,12 +13,8 @@ import argparse
 import sys
 from urllib.parse import urlparse
 
-try:
-    from jobhunter.scraper.ats import detect_ats, scrapers_for_detections
-    from jobhunter.scraper.collector import CompanyCareerPageScraper, _request_get
-except ModuleNotFoundError:  # pragma: no cover
-    from scraper.ats import detect_ats, scrapers_for_detections
-    from scraper.collector import CompanyCareerPageScraper, _request_get
+from jobhunter.scraper.ats import detect_ats, scrapers_for_detections
+from jobhunter.scraper.collector import CompanyCareerPageScraper, _request_get
 
 ENV_VARS = {
     "greenhouse": "GREENHOUSE_COMPANIES",
@@ -46,9 +42,15 @@ def split_target(value: str) -> tuple[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("targets", nargs="+", help="careers URLs, optionally 'Company Name|https://...'")
-    parser.add_argument("--count", action="store_true", help="query each detected board and count postings")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "targets", nargs="+", help="careers URLs, optionally 'Company Name|https://...'"
+    )
+    parser.add_argument(
+        "--count", action="store_true", help="query each detected board and count postings"
+    )
     args = parser.parse_args(argv)
 
     collected: dict[str, list[str]] = {}
@@ -62,8 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         detections = detect_ats(html, url)
         if not detections:
             jsonld = len(CompanyCareerPageScraper._parse_page(html, company, url)) if html else 0
-            print(f"- {company}: no ATS detected; page has {jsonld} JSON-LD postings "
-                  f"(keep it in COMPANY_CAREER_URLS to follow job links).")
+            print(
+                f"- {company}: no ATS detected; page has {jsonld} JSON-LD postings "
+                f"(keep it in COMPANY_CAREER_URLS to follow job links)."
+            )
             continue
         for detection in detections:
             entry = env_entry(company, detection)
@@ -71,7 +75,9 @@ def main(argv: list[str] | None = None) -> int:
             suffix = ""
             if args.count:
                 try:
-                    count = sum(len(s.scrape()) for s in scrapers_for_detections(company, [detection]))
+                    count = sum(
+                        len(s.scrape()) for s in scrapers_for_detections(company, [detection])
+                    )
                     suffix = f"  [{count} postings]"
                 except Exception as exc:
                     suffix = f"  [query failed: {exc}]"
