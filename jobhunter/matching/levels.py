@@ -4,21 +4,38 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from jobhunter.matching.requirements import extract_required_years
-    from jobhunter.textutils import contains_any_term, normalize_text
-except ModuleNotFoundError:  # pragma: no cover
-    from matching.requirements import extract_required_years
-    from textutils import contains_any_term, normalize_text
+from jobhunter.matching.requirements import extract_required_years
+from jobhunter.textutils import contains_any_term, normalize_text
 
 ENTRY_TITLE_TERMS = (
-    "junior", "jr", "entry level", "associate", "new grad", "graduate", "coordinator",
-    "engineer i", "developer i", "analyst i", "level 1", "debutant", "debutante",
+    "junior",
+    "jr",
+    "entry level",
+    "associate",
+    "new grad",
+    "graduate",
+    "coordinator",
+    "engineer i",
+    "developer i",
+    "analyst i",
+    "level 1",
+    "debutant",
+    "debutante",
 )
 ENTRY_DESCRIPTION_TERMS = (
-    "entry level", "new grad", "new graduate", "recent graduate", "recent graduates",
-    "graduate program", "nouveau diplome", "nouvelle diplomee", "no experience required",
-    "0 2 years", "0 1 year", "up to 2 years", "up to 1 year",
+    "entry level",
+    "new grad",
+    "new graduate",
+    "recent graduate",
+    "recent graduates",
+    "graduate program",
+    "nouveau diplome",
+    "nouvelle diplomee",
+    "no experience required",
+    "0 2 years",
+    "0 1 year",
+    "up to 2 years",
+    "up to 1 year",
 )
 
 

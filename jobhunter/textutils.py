@@ -15,7 +15,7 @@ from functools import lru_cache
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _TAG_RE = re.compile(r"<[^>]+>")
-_MARKDOWN_RE = re.compile(r"[*_`#]+")
+_MARKDOWN_RE = re.compile(r"\\[*_`#]|[*_`#]+")
 _SPACE_RE = re.compile(r"\s+")
 
 
@@ -57,6 +57,42 @@ def html_to_text(value: str) -> str:
     plain = _TAG_RE.sub(" ", value or "")
     plain = _MARKDOWN_RE.sub(" ", plain)
     return _SPACE_RE.sub(" ", plain).strip()
+
+
+_SALARY_NUMBER_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([kmb])?", re.I)
+_SALARY_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}
+_SALARY_EMPTY = {"", "not disclosed", "n/a", "na", "unknown", "not specified", "none", "nan", "tbd"}
+_HOURLY_RE = re.compile(r"per\s*hour|hourly|an?\s+hour|/\s*h(?:ou)?rs?\b|\bhrs?\b", re.I)
+
+
+def normalize_salary(value: str) -> str:
+    """Canonicalize a scraped salary string into one consistent display format.
+
+    Returns ``"Not disclosed"`` when the posting has no usable figure, otherwise
+    ``"$70,000 - $85,000 CAD/yr"`` (single value when only one is given, and a
+    ``/hr`` suffix for hourly postings). ``k``/``m`` suffixes are expanded so
+    ``"95K"`` and ``"$95,000"`` render identically.
+    """
+    text = (value or "").strip()
+    if text.lower() in _SALARY_EMPTY:
+        return "Not disclosed"
+    matches = _SALARY_NUMBER_RE.findall(text)
+    if not matches:
+        return "Not disclosed"
+    values = [
+        float(number.replace(",", "")) * _SALARY_MULTIPLIERS[suffix.lower()]
+        for number, suffix in matches[:2]
+    ]
+    currency = "USD" if re.search(r"usd|us\$", text, re.I) else "CAD"
+    unit = "/hr" if _HOURLY_RE.search(text) else "/yr"
+    low, high = values[0], (values[1] if len(values) > 1 else None)
+    if high is not None and high < low:
+        low, high = high, low
+    if low == high:
+        high = None
+    low_text = f"${low:,.0f}"
+    range_text = f"{low_text} - ${high:,.0f}" if high is not None else low_text
+    return f"{range_text} {currency}{unit}"
 
 
 # --------------------------------------------------------------------------

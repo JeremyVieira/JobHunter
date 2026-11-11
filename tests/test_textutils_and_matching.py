@@ -17,7 +17,9 @@ from jobhunter.matching.skills import get_matcher, skill_text
 from jobhunter.textutils import (
     contains_term,
     detect_language,
+    html_to_text,
     mentions_bilingual,
+    normalize_salary,
     normalize_text,
     parse_posting_date,
 )
@@ -33,8 +35,18 @@ def test_contains_term_is_whole_word_and_punctuation_tolerant():
 
 
 def test_detect_language_and_bilingual_mentions():
-    assert detect_language("Nous recherchons un développeur avec de l'expérience pour notre équipe et vous allez travailler avec nous.") == "fr"
-    assert detect_language("We are looking for a developer with strong experience to join our team and work with you.") == "en"
+    assert (
+        detect_language(
+            "Nous recherchons un développeur avec de l'expérience pour notre équipe et vous allez travailler avec nous."
+        )
+        == "fr"
+    )
+    assert (
+        detect_language(
+            "We are looking for a developer with strong experience to join our team and work with you."
+        )
+        == "en"
+    )
     assert detect_language("ok") == "unknown"
     assert mentions_bilingual("Bilingual (English and French) required")
     assert mentions_bilingual("Poste bilingue")
@@ -50,18 +62,49 @@ def test_parse_posting_date_handles_iso_and_relative_phrases():
     assert parse_posting_date("Unknown", today) is None
 
 
+def test_normalize_salary_canonicalizes_ranges_and_units():
+    assert normalize_salary("$70,000 - $85,000") == "$70,000 - $85,000 CAD/yr"
+    assert normalize_salary("$70,000 - $85,000 CAD/yr") == "$70,000 - $85,000 CAD/yr"
+    assert normalize_salary("95K") == "$95,000 CAD/yr"
+    assert normalize_salary("$80K - $100K") == "$80,000 - $100,000 CAD/yr"
+    assert normalize_salary("85k-95k") == "$85,000 - $95,000 CAD/yr"
+    assert normalize_salary("$30/hr") == "$30 CAD/hr"
+    assert normalize_salary("25 - 35 $ per hour") == "$25 - $35 CAD/hr"
+    assert normalize_salary("USD 100,000") == "$100,000 USD/yr"
+    assert normalize_salary("Not disclosed") == "Not disclosed"
+    assert normalize_salary("") == "Not disclosed"
+    assert normalize_salary("Competitive") == "Not disclosed"
+
+
+def test_html_to_text_collapses_markup_and_whitespace():
+    raw = "<p>Hello <b>world</b></p>\n\n**bold**  `code`\n\n   lots   of   space"
+    assert html_to_text(raw) == "Hello world bold code lots of space"
+
+
 # ---- skills ----------------------------------------------------------------
 def test_skill_extraction_keeps_symbols_and_avoids_substring_hits():
     found = get_matcher().extract(
         "C++/C# and .NET with Node.js, CI/CD, scikit-learn and PyTorch. "
         "Excellent skills in digital transformation. Java or JavaScript."
     )
-    assert {"c++", "c#", ".net", "node.js", "ci/cd", "scikit-learn", "pytorch", "java", "javascript"} <= set(found)
+    assert {
+        "c++",
+        "c#",
+        ".net",
+        "node.js",
+        "ci/cd",
+        "scikit-learn",
+        "pytorch",
+        "java",
+        "javascript",
+    } <= set(found)
     assert "excel" not in found and "git" not in found
 
 
 def test_common_english_words_are_not_skills():
-    found = get_matcher().extract("We express interest this spring with a swift response; spark joy.")
+    found = get_matcher().extract(
+        "We express interest this spring with a swift response; spark joy."
+    )
     assert found == {}
 
 
@@ -148,4 +191,9 @@ def test_entry_level_detection():
     assert is_entry_level({"title": "Developer", "description": "Recent graduates welcome"})
     assert is_entry_level({"title": "Developer", "description": "1 year of experience"})
     # an incidental "1 year" must not count
-    assert not is_entry_level({"title": "Developer", "description": "Pays a bonus after 1 year at the company; 4 years experience required."})
+    assert not is_entry_level(
+        {
+            "title": "Developer",
+            "description": "Pays a bonus after 1 year at the company; 4 years experience required.",
+        }
+    )
