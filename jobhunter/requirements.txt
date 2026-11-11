@@ -1,7 +1,7 @@
 python-dotenv==1.2.2
 requests==2.33.0
 beautifulsoup4==4.12.3
-pandas==2.2.3
+pandas==3.1.1
 streamlit==1.54.0
 # Streamlit's tables need pyarrow. pyarrow 26 requires NumPy 2 but python-jobspy pins NumPy 1.26;
 # 23.0.1 is the tested version that works with NumPy 1.26 and has no known advisories.
