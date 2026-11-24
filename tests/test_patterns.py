@@ -190,6 +190,7 @@ def test_job_collection_pipeline():
             ensure_database=lambda: None,
             purge_placeholder_jobs=lambda: None,
             purge_red_flag_jobs=lambda: None,
+            purge_stale_jobs=lambda max_age: None,
             filter_applied_jobs=lambda jobs: list(jobs),
             save_jobs=lambda jobs: len(jobs),
             output_dir=Path(tmpdir),

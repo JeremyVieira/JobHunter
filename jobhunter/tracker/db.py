@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -11,6 +11,7 @@ from jobhunter.config.settings import DB_PATH
 from jobhunter.filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
 from jobhunter.models import ApplicationRecord, JobListing
 from jobhunter.scraper.dedupe import identity
+from jobhunter.textutils import parse_posting_date
 
 # Application lifecycle. Anything past "saved" means the posting has been acted on and
 # must stay hidden from the "new opportunities" lists (not just status == "applied").
@@ -64,6 +65,7 @@ class IJobRepository(Protocol):
     def save_many(self, jobs: Iterable[JobListing | dict[str, Any]]) -> int: ...
     def purge_placeholders(self) -> int: ...
     def purge_red_flag_jobs(self) -> int: ...
+    def purge_stale_jobs(self, max_age_days: int = 14) -> int: ...
     def reset_jobs(self) -> int: ...
     def dismiss(self, job: JobListing | dict[str, Any]) -> int: ...
     def find_recent(self, limit: int = 15) -> list[sqlite3.Row]: ...
@@ -233,6 +235,49 @@ class SQLiteJobRepository:
             )
             conn.commit()
             return cursor.rowcount
+        finally:
+            conn.close()
+
+    def purge_stale_jobs(self, max_age_days: int = 14) -> int:
+        """Remove old aggregator listings already stored in SQLite.
+
+        First-party ATS sources are omitted because those APIs expose currently-live
+        postings and may not provide a reliable publication date.
+        """
+        aggregator_sources = {
+            "adzuna",
+            "arbeitnow",
+            "glassdoor",
+            "google",
+            "indeed",
+            "jobicy",
+            "jobspy",
+            "jooble",
+            "linkedin",
+            "remotive",
+            "rss",
+            "themuse",
+            "zip_recruiter",
+        }
+        cutoff = date.today() - timedelta(days=max(0, max_age_days))
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("SELECT url, posting_date, source FROM jobs").fetchall()
+            stale_urls = []
+            for row in rows:
+                source = str(row["source"] or "").lower().split(":")[0]
+                if source not in aggregator_sources:
+                    continue
+                parsed = parse_posting_date(str(row["posting_date"] or ""))
+                if parsed is not None and parsed < cutoff:
+                    stale_urls.append(row["url"])
+            if stale_urls:
+                conn.executemany(
+                    "DELETE FROM jobs WHERE url = ?",
+                    [(url,) for url in stale_urls],
+                )
+            conn.commit()
+            return len(stale_urls)
         finally:
             conn.close()
 
@@ -574,6 +619,10 @@ def purge_placeholder_jobs() -> int:
 
 def purge_red_flag_jobs() -> int:
     return _default_job_repo.purge_red_flag_jobs()
+
+
+def purge_stale_jobs(max_age_days: int = 14) -> int:
+    return _default_job_repo.purge_stale_jobs(max_age_days)
 
 
 def purge_nonlocal_jobs() -> int:

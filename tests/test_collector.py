@@ -14,10 +14,12 @@ from jobhunter.scraper.collector import (
     fetch_jobicy_jobs,
     fetch_jobspy_jobs,
     fetch_remotive_jobs,
+    filter_stale_jobs,
     normalize_job,
     parse_generic_html,
     parse_indeed_html,
     parse_linkedin_html,
+    verify_live_listings,
 )
 
 
@@ -49,6 +51,57 @@ def test_normalize_job_with_missing_fields():
     assert normalized["location"] == "Unknown"
     assert normalized["salary"] == "Not disclosed"
     assert normalized["source"] == "manual"
+
+
+def test_filter_stale_jobs_removes_old_aggregator_listings():
+    jobs = [
+        {
+            "title": "Old LinkedIn role",
+            "source": "linkedin",
+            "posting_date": "2020-01-01",
+            "url": "https://linkedin.com/jobs/old",
+        },
+        {
+            "title": "Fresh LinkedIn role",
+            "source": "linkedin",
+            "posting_date": "2026-11-20",
+            "url": "https://linkedin.com/jobs/fresh",
+        },
+        {
+            "title": "Live Greenhouse role",
+            "source": "greenhouse",
+            "posting_date": "2020-01-01",
+            "url": "https://boards.greenhouse.io/acme/jobs/123",
+        },
+    ]
+    kept = filter_stale_jobs(jobs, max_age_days=14)
+    assert [job["title"] for job in kept] == [
+        "Fresh LinkedIn role",
+        "Live Greenhouse role",
+    ]
+
+
+def test_verify_live_listings_drops_only_explicit_dead_responses(monkeypatch):
+    class Response:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    monkeypatch.setattr(
+        "jobhunter.scraper.collector.requests.head",
+        lambda *args, **kwargs: Response(404),
+    )
+    jobs = [
+        {"title": "Dead", "source": "jobicy", "url": "https://jobicy.com/jobs/dead"},
+        {"title": "Blocked", "source": "jobspy", "url": "https://linkedin.com/jobs/blocked"},
+    ]
+
+    def fake_head(*args, **kwargs):
+        url = args[0]
+        return Response(404 if "dead" in url else 403)
+
+    monkeypatch.setattr("jobhunter.scraper.collector.requests.head", fake_head)
+    kept = verify_live_listings(jobs, max_checks=10)
+    assert [job["title"] for job in kept] == ["Blocked"]
 
 
 def test_normalize_job_truncates_long_description():

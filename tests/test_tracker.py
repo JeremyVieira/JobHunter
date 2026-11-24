@@ -12,6 +12,7 @@ from jobhunter.tracker.db import (
     get_recent_jobs,
     get_top_jobs,
     purge_placeholder_jobs,
+    purge_stale_jobs,
     save_application,
     save_jobs,
 )
@@ -197,6 +198,48 @@ def test_purge_placeholder_jobs_removes_only_synthetic_rows():
 
             assert purge_placeholder_jobs() == 2
             assert len(get_top_jobs()) == 1
+        finally:
+            db_module.get_connection = original_get_connection
+
+
+def test_purge_stale_jobs_removes_old_aggregators_but_keeps_first_party():
+    import jobhunter.tracker.db as db_module
+
+    original_get_connection = db_module.get_connection
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        def patched_get_connection():
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        db_module.get_connection = patched_get_connection
+        try:
+            ensure_database()
+            save_jobs(
+                [
+                    {
+                        "title": "Old",
+                        "company": "Acme",
+                        "url": "https://linkedin.com/jobs/old",
+                        "posting_date": "2020-01-01",
+                        "source": "linkedin",
+                        "fit_score": 80,
+                    },
+                    {
+                        "title": "Live",
+                        "company": "Acme",
+                        "url": "https://boards.greenhouse.io/acme/jobs/live",
+                        "posting_date": "2020-01-01",
+                        "source": "greenhouse",
+                        "fit_score": 80,
+                    },
+                ]
+            )
+            assert purge_stale_jobs(max_age_days=14) == 1
+            remaining = [dict(job) for job in get_top_jobs()]
+            assert [job["title"] for job in remaining] == ["Live"]
         finally:
             db_module.get_connection = original_get_connection
 

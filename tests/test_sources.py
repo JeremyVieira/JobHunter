@@ -6,6 +6,7 @@ Payloads mirror each vendor's documented public response shape; no network is us
 import json
 
 import pytest
+import requests
 
 from jobhunter.scraper import ats, boards, collector, discover, enrich
 from jobhunter.scraper.dedupe import dedupe_jobs
@@ -374,6 +375,19 @@ def test_the_muse_scraper_prefers_the_montreal_location(monkeypatch):
     assert jobs[0]["location"] == "Montreal, Canada" and jobs[0]["source"] == "themuse"
     assert ("location", "Montreal, Canada") in fake.calls[0][1]["params"]
     assert boards.TheMuseScraper(enabled=False).scrape() == []
+
+
+def test_the_muse_scraper_treats_404_as_an_unavailable_source(monkeypatch):
+    def fake_404(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = 404
+        response.url = args[0]
+        raise requests.HTTPError("404", response=response)
+
+    monkeypatch.setattr(boards, "_request_get", fake_404)
+    scraper = boards.TheMuseScraper()
+    assert scraper.scrape() == []
+    assert scraper.enabled is False
 
 
 def test_keyed_aggregators_are_skipped_without_keys():

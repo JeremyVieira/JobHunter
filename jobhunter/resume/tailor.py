@@ -5,28 +5,29 @@ import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from hashlib import sha256
-from html import escape
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import RGBColor
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate
 
-from jobhunter.config.settings import OUTPUT_DIR, RESUME_SOURCE_DIR, USER_PROFILE
+from jobhunter.config.settings import (
+    OUTPUT_DIR,
+    RESUME_INCLUDE_STREET_ADDRESS,
+    RESUME_LAYOUT,
+    RESUME_SOURCE_DIR,
+    USER_PROFILE,
+)
 from jobhunter.matching.requirements import analyze_posting, candidate_inventory
 from jobhunter.matching.skills import expand_inventory, get_matcher
+from jobhunter.resume.layout import clean_location, parse_resume
 from jobhunter.resume.letter import build_cover_letter
+from jobhunter.resume.render import (
+    DocxResumeExporter,
+    PdfResumeExporter,
+    build_letter_docx,
+    choose_density,
+)
 from jobhunter.resume.tailoring import (
     DATE_LINE_PATTERN,
     SECTION_HEADERS,
@@ -151,196 +152,15 @@ class IResumeExporter(ABC):
     def export(self, parsed: ParsedResume, output_path: Path) -> str: ...
 
 
+IResumeExporter.register(DocxResumeExporter)
+IResumeExporter.register(PdfResumeExporter)
+
+
 class TxtResumeExporter(IResumeExporter):
     def export(self, parsed: ParsedResume, output_path: Path) -> str:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(parsed.raw_text, encoding="utf-8")
         return str(output_path)
-
-
-def _add_docx_hyperlink(
-    paragraph, url: str, text: str, font_size_pt: float = 9, color_hex: str = ACCENT_HEX
-) -> None:
-    """Insert a clickable hyperlink run into a python-docx paragraph.
-
-    python-docx has no built-in hyperlink API, so this builds the required
-    <w:hyperlink> XML directly. The run's font size/color are set here (not via
-    paragraph.runs) because python-docx's `.runs` accessor only sees runs that
-    are direct children of the paragraph, and a hyperlink run is nested one
-    level deeper.
-    """
-    part = paragraph.part
-    r_id = part.relate_to(
-        url,
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-        is_external=True,
-    )
-    hyperlink = OxmlElement("w:hyperlink")
-    hyperlink.set(qn("r:id"), r_id)
-
-    run = OxmlElement("w:r")
-    rpr = OxmlElement("w:rPr")
-
-    color = OxmlElement("w:color")
-    color.set(qn("w:val"), color_hex)
-    rpr.append(color)
-
-    underline = OxmlElement("w:u")
-    underline.set(qn("w:val"), "single")
-    rpr.append(underline)
-
-    size = OxmlElement("w:sz")
-    size.set(qn("w:val"), str(int(font_size_pt * 2)))  # half-points
-    rpr.append(size)
-
-    run.append(rpr)
-    text_el = OxmlElement("w:t")
-    text_el.text = text
-    run.append(text_el)
-    hyperlink.append(run)
-    paragraph._p.append(hyperlink)
-
-
-def _add_contact_line_docx(
-    document: Document, contacts: list[str], font_size_pt: float = 9
-) -> None:
-    """Render the contact line, hyperlinking anything that looks like an email
-    or a URL while leaving plain text (address, phone) as-is."""
-    paragraph = document.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for index, item in enumerate(contacts):
-        if index > 0:
-            separator = paragraph.add_run("  |  ")
-            separator.font.size = Pt(font_size_pt)
-        if "@" in item:
-            _add_docx_hyperlink(paragraph, f"mailto:{item}", item, font_size_pt=font_size_pt)
-        elif item.lower().startswith(("http://", "https://")):
-            _add_docx_hyperlink(paragraph, item, item, font_size_pt=font_size_pt)
-        else:
-            run = paragraph.add_run(item)
-            run.font.size = Pt(font_size_pt)
-    paragraph.paragraph_format.space_after = Pt(8)
-
-
-class DocxResumeExporter(IResumeExporter):
-    def export(self, parsed: ParsedResume, output_path: Path) -> str:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        document = Document()
-        _configure_docx(document)
-
-        for block in parsed.blocks:
-            kind, value = block.kind, block.value
-            if kind == "header":
-                name, contacts = value
-                paragraph = document.add_paragraph()
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = paragraph.add_run(name.upper())
-                run.bold = True
-                run.font.name = "Aptos Display"
-                run.font.size = Pt(17)
-                run.font.color.rgb = ACCENT_COLOR
-                _add_contact_line_docx(document, contacts)
-            elif kind == "section":
-                paragraph = document.add_paragraph()
-                run = paragraph.add_run(value.upper())
-                run.bold = True
-                run.font.size = Pt(10.5)
-                run.font.color.rgb = ACCENT_COLOR
-                _set_cell_border_bottom(paragraph)
-                paragraph.paragraph_format.space_before = Pt(5)
-                paragraph.paragraph_format.space_after = Pt(1)
-            elif kind == "summary":
-                # Regular justified prose -- not bold. Previously this fell
-                # through to the "entry" branch below and rendered as a bold
-                # heading-style line, which is wrong for a paragraph of text.
-                paragraph = document.add_paragraph()
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                run = paragraph.add_run(value)
-                run.font.size = Pt(9)
-                paragraph.paragraph_format.space_after = Pt(4)
-            elif kind == "entry":
-                paragraph = document.add_paragraph()
-                run = paragraph.add_run(value)
-                run.bold = True
-                run.font.size = Pt(9.5)
-                paragraph.paragraph_format.space_before = Pt(3)
-            elif kind == "date":
-                paragraph = document.add_paragraph(value)
-                paragraph.paragraph_format.space_after = Pt(1)
-                paragraph.runs[0].italic = True
-                paragraph.runs[0].font.size = Pt(8.5)
-            elif kind == "bullet":
-                paragraph = document.add_paragraph(style="Normal")
-                paragraph.paragraph_format.left_indent = Inches(0.2)
-                paragraph.paragraph_format.first_line_indent = Inches(-0.14)
-                paragraph.paragraph_format.space_after = Pt(1)
-                run = paragraph.add_run("•  " + value)
-                run.font.size = Pt(9)
-
-        document.save(output_path)
-        return str(output_path)
-
-
-class PdfResumeExporter(IResumeExporter):
-    def export(self, parsed: ParsedResume, output_path: Path) -> str:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        document = SimpleDocTemplate(
-            str(output_path),
-            pagesize=letter,
-            topMargin=0.35 * inch,
-            bottomMargin=0.35 * inch,
-            leftMargin=0.65 * inch,
-            rightMargin=0.65 * inch,
-        )
-        styles = _pdf_styles()
-        story = []
-
-        for block in parsed.blocks:
-            kind, value = block.kind, block.value
-            if kind == "header":
-                name, contacts = value
-                contact_markup = " | ".join(_pdf_contact_markup(item) for item in contacts)
-                story.extend(
-                    [
-                        Paragraph(escape(name.upper()), styles["name"]),
-                        Paragraph(contact_markup, styles["contact"]),
-                        HRFlowable(
-                            width="100%", thickness=0.9, color=PDF_ACCENT_COLOR, spaceAfter=2
-                        ),
-                    ]
-                )
-            elif kind == "section":
-                story.extend(
-                    [
-                        Paragraph(escape(value.upper()), styles["section"]),
-                        HRFlowable(
-                            width="100%", thickness=0.5, color=PDF_ACCENT_COLOR, spaceAfter=1
-                        ),
-                    ]
-                )
-            elif kind == "summary":
-                # Justified prose, not bold -- same fix as the DOCX exporter.
-                story.append(Paragraph(escape(value), styles["summary"]))
-            elif kind == "entry":
-                story.append(Paragraph(escape(value), styles["entry"]))
-            elif kind == "date":
-                story.append(Paragraph(escape(value), styles["date"]))
-            elif kind == "bullet":
-                story.append(Paragraph("• " + escape(value), styles["bullet"]))
-
-        document.build(story)
-        return str(output_path)
-
-
-def _pdf_contact_markup(item: str) -> str:
-    """Return reportlab mini-markup for one contact item, hyperlinked if it's
-    an email or URL, escaped either way so no stray text breaks the markup."""
-    safe = escape(item)
-    if "@" in item:
-        return f'<link href="mailto:{safe}" color="#1F4E79"><u>{safe}</u></link>'
-    if item.lower().startswith(("http://", "https://")):
-        return f'<link href="{safe}" color="#1F4E79"><u>{safe}</u></link>'
-    return safe
 
 
 def build_master_resume(language: str = "en") -> str:
@@ -385,38 +205,31 @@ def tailor_resume_for_job(
     return tailor_resume_text(build_master_resume(language), job_title, job_description, language)
 
 
+def prepare_resume_text(
+    job_title: str, company_name: str, language: str = "en", job_description: str = ""
+) -> str:
+    """The tailored resume text that gets exported (and verified).
+
+    On top of :func:`tailor_resume_for_job` this applies ``RESUME_LAYOUT`` (section order)
+    and uses the page well: three projects when they fit on one page at a readable size
+    (9.5 pt or larger), otherwise two. Only existing master-resume lines are used.
+    """
+    master = build_master_resume(language)
+    text = ""
+    for projects in (3, 2):
+        text = tailor_resume_text(
+            master, job_title, job_description, language, max_projects=projects, layout=RESUME_LAYOUT
+        )
+        density, pages = choose_density(parse_resume(text, RESUME_INCLUDE_STREET_ADDRESS))
+        if pages <= 1 and density.body >= 9.5:
+            break
+    return text
+
+
 def _resume_blocks(resume_text: str) -> list[tuple[str, object]]:
     """Convert the simple master-resume format into typed document blocks."""
     parsed = ResumeParser.parse(resume_text)
     return [(b.kind, b.value) for b in parsed.blocks]
-
-
-def _set_cell_border_bottom(paragraph) -> None:
-    paragraph_format = paragraph.paragraph_format
-    paragraph_format.space_after = Pt(5)
-    borders = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "12")
-    bottom.set(qn("w:space"), "1")
-    bottom.set(qn("w:color"), ACCENT_HEX)
-    borders.append(bottom)
-    paragraph._p.get_or_add_pPr().append(borders)
-
-
-def _configure_docx(document: Document) -> None:
-    section = document.sections[0]
-    section.top_margin = Inches(0.4)
-    section.bottom_margin = Inches(0.4)
-    section.left_margin = Inches(0.65)
-    section.right_margin = Inches(0.65)
-
-    normal = document.styles["Normal"]
-    normal.font.name = "Aptos"
-    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Aptos")
-    normal.font.size = Pt(9.5)
-    normal.paragraph_format.space_after = Pt(1.5)
-    normal.paragraph_format.line_spacing = 1.0
 
 
 def export_resume_docx(
@@ -431,117 +244,9 @@ def export_resume_docx(
     suffix = _language_suffix(language)
     company_slug = _filename_component(company_name)
     file_path = target_dir / f"resume_{company_slug}{suffix}.docx"
-    resume_text = tailor_resume_for_job(job_title, company_name, language, job_description)
+    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
     parsed = ResumeParser.parse(resume_text)
     return DocxResumeExporter().export(parsed, file_path)
-
-
-def _register_pdf_fonts() -> None:
-    """Register a Unicode-capable font for PDF output on Windows."""
-    fonts = {
-        "ResumeArial": "C:\\Windows\\Fonts\\arial.ttf",
-        "ResumeArial-Bold": "C:\\Windows\\Fonts\\arialbd.ttf",
-        "ResumeArial-Italic": "C:\\Windows\\Fonts\\ariali.ttf",
-        "ResumeArial-BoldItalic": "C:\\Windows\\Fonts\\arialbi.ttf",
-    }
-    for name, path in fonts.items():
-        if name not in pdfmetrics.getRegisteredFontNames() and Path(path).exists():
-            pdfmetrics.registerFont(TTFont(name, path))
-
-
-def _pdf_styles() -> dict[str, ParagraphStyle]:
-    _register_pdf_fonts()
-    font_regular = (
-        "ResumeArial" if "ResumeArial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    )
-    font_bold = (
-        "ResumeArial-Bold"
-        if "ResumeArial-Bold" in pdfmetrics.getRegisteredFontNames()
-        else "Helvetica-Bold"
-    )
-    font_italic = (
-        "ResumeArial-Italic"
-        if "ResumeArial-Italic" in pdfmetrics.getRegisteredFontNames()
-        else "Helvetica-Oblique"
-    )
-    base = getSampleStyleSheet()
-    return {
-        "name": ParagraphStyle(
-            "resume-name",
-            parent=base["Normal"],
-            fontName=font_bold,
-            fontSize=18,
-            leading=21,
-            textColor=PDF_ACCENT_COLOR,
-            alignment=TA_CENTER,
-            spaceAfter=2,
-        ),
-        "contact": ParagraphStyle(
-            "resume-contact",
-            parent=base["Normal"],
-            fontName=font_regular,
-            fontSize=8.5,
-            leading=10,
-            textColor=colors.HexColor("#404040"),
-            alignment=TA_CENTER,
-            spaceAfter=5,
-        ),
-        "section": ParagraphStyle(
-            "resume-section",
-            parent=base["Normal"],
-            fontName=font_bold,
-            fontSize=10.5,
-            leading=12.5,
-            textColor=PDF_ACCENT_COLOR,
-            spaceBefore=6,
-            spaceAfter=2,
-        ),
-        "summary": ParagraphStyle(
-            "resume-summary",
-            parent=base["Normal"],
-            fontName=font_regular,
-            fontSize=9,
-            leading=11.5,
-            alignment=TA_JUSTIFY,
-            spaceAfter=4,
-        ),
-        "entry": ParagraphStyle(
-            "resume-entry",
-            parent=base["Normal"],
-            fontName=font_bold,
-            fontSize=9.8,
-            leading=11.5,
-            spaceBefore=3,
-            spaceAfter=1,
-        ),
-        "date": ParagraphStyle(
-            "resume-date",
-            parent=base["Normal"],
-            fontName=font_italic,
-            fontSize=8.3,
-            leading=9.5,
-            textColor=colors.HexColor("#555555"),
-            spaceAfter=0.5,
-        ),
-        "bullet": ParagraphStyle(
-            "resume-bullet",
-            parent=base["Normal"],
-            fontName=font_regular,
-            fontSize=9,
-            leading=10.5,
-            leftIndent=12,
-            firstLineIndent=-8,
-            spaceAfter=1,
-        ),
-        "body": ParagraphStyle(
-            "resume-body",
-            parent=base["Normal"],
-            fontName=font_regular,
-            fontSize=9,
-            leading=10.5,
-            spaceAfter=1.5,
-        ),
-    }
 
 
 def export_resume_pdf(
@@ -556,7 +261,7 @@ def export_resume_pdf(
     suffix = _language_suffix(language)
     company_slug = _filename_component(company_name)
     file_path = target_dir / f"resume_{company_slug}{suffix}.pdf"
-    resume_text = tailor_resume_for_job(job_title, company_name, language, job_description)
+    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
     parsed = ResumeParser.parse(resume_text)
     return PdfResumeExporter().export(parsed, file_path)
 
@@ -575,7 +280,7 @@ def export_resume_files(
     result = {}
     suffix = _language_suffix(language)
     company_slug = _filename_component(company_name)
-    resume_text = tailor_resume_for_job(job_title, company_name, language, job_description)
+    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
     parsed = ResumeParser.parse(resume_text)
 
     if "txt" in wanted_formats:
@@ -605,7 +310,7 @@ def _letter_for(
         strip_tags_from_text(build_master_resume(language)),
         language=language,
         user_name=USER_PROFILE["name"],
-        user_location=USER_PROFILE["location"],
+        user_location=clean_location(USER_PROFILE["location"]),
         company_hook=company_hook,
         mention_gaps=mention_gaps,
     )
@@ -650,20 +355,13 @@ def export_cover_letter(
     suffix = _language_suffix(language)
     company_slug = _filename_component(company_name)
     file_path = target_dir / f"cover_letter_{company_slug}{suffix}.docx"
-    document = Document()
-    _configure_docx(document)
-
     letter = (
         generate_cover_letter_french(job_title, company_name, job_description, company_hook)
         if language == "fr"
         else generate_cover_letter(job_title, company_name, job_description, company_hook)
     )
-    for text in letter.split("\n\n"):
-        paragraph = document.add_paragraph(text)
-        paragraph.paragraph_format.space_after = Pt(9)
-        paragraph.paragraph_format.line_spacing = 1.08
-
-    document.save(file_path)
+    letterhead = parse_resume(build_master_resume(language), RESUME_INCLUDE_STREET_ADDRESS)
+    build_letter_docx(letter, letterhead).save(str(file_path))
     return str(file_path)
 
 
@@ -743,7 +441,7 @@ def generate_application_pack(
         result[f"{language}_cover_letter_docx"] = cover
 
         master = build_master_resume(language)
-        tailored = tailor_resume_for_job(job_title, company_name, language, description)
+        tailored = prepare_resume_text(job_title, company_name, language, description)
         # Summary variants are user-authored; anything else off-master is flagged.
         from_variants = _summary_variant_lines(language)
         for issue in verify_resume(tailored, master, allowed_extra_lines=from_variants):

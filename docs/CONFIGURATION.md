@@ -20,6 +20,7 @@ Run `python -m jobhunter doctor` at any time to see what is set, what is missing
 | `JOB_SEARCH_TERMS`, `JOB_SEARCH_LOCATION` | Queries and location for the JobSpy-backed boards. |
 | `JOBSPY_SITES` | Which JobSpy boards to query. Remove any you do not intend to use. |
 | `JOBSPY_HOURS_OLD` (72), `JOBSPY_RESULTS_PER_TERM` (15), `JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS` (true), `JOBSPY_PROXIES` | Freshness window, volume, full LinkedIn descriptions, optional proxies (only where you are authorised to use them). |
+| `MAX_JOB_AGE_DAYS` (14), `VERIFY_LISTING_URLS` (true), `MAX_LISTING_URL_CHECKS` (40), `LISTING_URL_TIMEOUT_SECONDS` (8) | Maximum age for aggregator listings and live URL verification. Verification fails closed only on explicit 404/410 responses; blocked or unverified pages remain in the list. |
 | `COMPANY_CAREER_URLS` | `Name|careers URL`, comma-separated. The employer's ATS is detected automatically. |
 | `GREENHOUSE_COMPANIES`, `LEVER_COMPANIES`, `ASHBY_COMPANIES`, `WORKABLE_COMPANIES`, `SMARTRECRUITERS_COMPANIES`, `RECRUITEE_COMPANIES` | `Name|token`, comma-separated. |
 | `WORKDAY_COMPANIES` | `Name|tenant|wdN|Site`, comma-separated. |
@@ -59,6 +60,13 @@ Create `jobhunter/resume/master_resume.txt` (and optionally `master_resume_fr.tx
 `[tags: gcp, terraform]` to help ranking; tags are never rendered. Optionally copy
 `summary_variants.template.json` to `summary_variants.json` and write your own summaries per role
 family. Review every generated document before sending it.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RESUME_LAYOUT` | `auto` | Section order: `auto`, `experience-first`, `education-first` or `keep`. |
+| `RESUME_INCLUDE_STREET_ADDRESS` | `false` | Generated resumes omit your street address and postal code unless you set `true`. |
+
+See [RESUME_GUIDE.md](RESUME_GUIDE.md) for the master format and `python -m jobhunter resume-audit`.
 
 ## Location rules
 

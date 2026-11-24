@@ -15,10 +15,9 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from jobhunter.config import settings as _settings
+from jobhunter.config import registry
 from jobhunter.scraper.collector import (
     DEFAULT_SEARCH_TERMS,
-    JOB_SEARCH_LOCATION,
     JOB_SEARCH_TERMS,
     BaseScraper,
     ScraperFactory,
@@ -59,7 +58,7 @@ class TheMuseScraper(BaseScraper):
         self.levels = levels
         self.timeout = timeout
         self.enabled = (
-            bool(getattr(_settings, "MUSE_ENABLED", True)) if enabled is None else enabled
+            bool(registry.setting("MUSE_ENABLED", True)) if enabled is None else enabled
         )
 
     def scrape(self) -> list[dict[str, Any]]:
@@ -67,15 +66,24 @@ class TheMuseScraper(BaseScraper):
             return []
         jobs: list[dict[str, Any]] = []
         for page in range(1, self.MAX_PAGES + 1):
-            payload = _request_get(
-                MUSE_API,
-                params=[
-                    ("page", page),
-                    ("location", self.location),
-                    *[("level", lvl) for lvl in self.levels],
-                ],
-                timeout=self.timeout,
-            ).json()
+            try:
+                payload = _request_get(
+                    MUSE_API,
+                    params=[
+                        ("page", page),
+                        ("location", self.location),
+                        *[("level", lvl) for lvl in self.levels],
+                    ],
+                    timeout=self.timeout,
+                ).json()
+            except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status in {404, 410}:
+                    LOGGER.warning("The Muse jobs API is unavailable (HTTP %s); skipping this source.", status)
+                    self.enabled = False
+                else:
+                    LOGGER.exception("The Muse jobs API request failed on page %s.", page)
+                break
             for item in payload.get("results", []):
                 locations = [
                     str(loc.get("name") or "")
@@ -121,10 +129,10 @@ class AdzunaScraper(BaseScraper):
         results_per_term: int = 30,
         timeout: int = 20,
     ):
-        self.app_id = app_id if app_id is not None else getattr(_settings, "ADZUNA_APP_ID", "")
-        self.app_key = app_key if app_key is not None else getattr(_settings, "ADZUNA_APP_KEY", "")
+        self.app_id = app_id if app_id is not None else registry.setting("ADZUNA_APP_ID", "")
+        self.app_key = app_key if app_key is not None else registry.setting("ADZUNA_APP_KEY", "")
         self.search_terms = _terms(search_terms)
-        self.where = where or JOB_SEARCH_LOCATION.split(",")[0]
+        self.where = where or registry.setting("JOB_SEARCH_LOCATION", "Montreal, QC").split(",")[0]
         self.max_days_old = max_days_old
         self.results_per_term = results_per_term
         self.timeout = timeout
@@ -182,9 +190,9 @@ class JoobleScraper(BaseScraper):
         location: str | None = None,
         timeout: int = 20,
     ):
-        self.api_key = api_key if api_key is not None else getattr(_settings, "JOOBLE_API_KEY", "")
+        self.api_key = api_key if api_key is not None else registry.setting("JOOBLE_API_KEY", "")
         self.search_terms = _terms(search_terms)
-        self.location = location or JOB_SEARCH_LOCATION
+        self.location = location or registry.setting("JOB_SEARCH_LOCATION", "Montreal, QC")
         self.timeout = timeout
 
     def scrape(self) -> list[dict[str, Any]]:
@@ -224,7 +232,7 @@ class RssFeedScraper(BaseScraper):
     """Generic RSS 2.0 / Atom job feeds. Entries are ``(feed name, feed url)``."""
 
     def __init__(self, feeds: list[tuple[str, ...]] | None = None, timeout: int = 20):
-        self.feeds = list(feeds) if feeds is not None else list(getattr(_settings, "RSS_FEEDS", []))
+        self.feeds = list(feeds) if feeds is not None else list(registry.setting("RSS_FEEDS", []))
         self.timeout = timeout
 
     @staticmethod

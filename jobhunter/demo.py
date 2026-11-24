@@ -12,11 +12,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from jobhunter.config.dashboard import dashboard_command
 from jobhunter.config.settings import BASE_DIR, DATA_DIR
 from jobhunter.filter import filter_jobs
 from jobhunter.matching.inventory import resume_skill_ids
@@ -390,21 +390,12 @@ def run_demo(host: str = "127.0.0.1", port: int = 8502, open_browser: bool = Tru
     paths = seed_demo()
     print(f"Demo workspace ready at {paths['dir']} (your real data is untouched).")
     print(f"Open http://localhost:{port}  - press Ctrl+C to stop.")
-    command = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(BASE_DIR / "dashboard" / "app.py"),
-        "--server.address",
-        host,
-        "--server.port",
-        str(port),
-        "--browser.gatherUsageStats",
-        "false",
-    ]
-    if not open_browser:
-        command += ["--server.headless", "true"]
+    command = dashboard_command(
+        BASE_DIR,
+        host=host,
+        port=port,
+        headless=not open_browser,
+    )
     try:
         return subprocess.call(command, cwd=BASE_DIR, env=demo_environment(paths))
     except KeyboardInterrupt:

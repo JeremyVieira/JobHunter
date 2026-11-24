@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
-from jobhunter.config import settings as _settings
+from jobhunter.config import registry
 from jobhunter.filter import (
     MONTREAL_AREA_TERMS,
     _title_matches_target,
@@ -95,7 +95,7 @@ class _BoardScraper(BaseScraper):
 
     @classmethod
     def default_companies(cls) -> list[tuple[str, ...]]:
-        return []
+        return list(registry.setting(registry.BOARD_SETTINGS[cls.__name__], []))
 
     def scrape(self) -> list[dict[str, Any]]:
         if not self.companies:
@@ -122,9 +122,6 @@ class AshbyScraper(_BoardScraper):
 
     source = "ashby"
 
-    @classmethod
-    def default_companies(cls):
-        return list(getattr(_settings, "ASHBY_BOARDS", []))
 
     def scrape_company(self, company: str, token: str) -> list[dict[str, Any]]:
         payload = _request_get(ASHBY_API.format(token=token), timeout=self.timeout).json()
@@ -164,9 +161,6 @@ class WorkableScraper(_BoardScraper):
 
     source = "workable"
 
-    @classmethod
-    def default_companies(cls):
-        return list(getattr(_settings, "WORKABLE_BOARDS", []))
 
     def scrape_company(self, company: str, token: str) -> list[dict[str, Any]]:
         payload = _request_get(WORKABLE_API.format(token=token), timeout=self.timeout).json()
@@ -208,9 +202,6 @@ class SmartRecruitersScraper(_BoardScraper):
     MAX_PAGES = 5
     MAX_DETAILS = 40
 
-    @classmethod
-    def default_companies(cls):
-        return list(getattr(_settings, "SMARTRECRUITERS_BOARDS", []))
 
     def scrape_company(self, company: str, token: str) -> list[dict[str, Any]]:
         postings: list[dict[str, Any]] = []
@@ -288,9 +279,6 @@ class RecruiteeScraper(_BoardScraper):
 
     source = "recruitee"
 
-    @classmethod
-    def default_companies(cls):
-        return list(getattr(_settings, "RECRUITEE_BOARDS", []))
 
     def scrape_company(self, company: str, token: str) -> list[dict[str, Any]]:
         payload = _request_get(RECRUITEE_API.format(token=token), timeout=self.timeout).json()
@@ -343,9 +331,6 @@ class WorkdayScraper(_BoardScraper):
         super().__init__(companies, timeout)
         self.search_terms = tuple(search_terms) if search_terms else DEFAULT_WORKDAY_TERMS
 
-    @classmethod
-    def default_companies(cls):
-        return list(getattr(_settings, "WORKDAY_BOARDS", []))
 
     def scrape_company(self, company: str, tenant: str, dc: str, site: str) -> list[dict[str, Any]]:
         base = WORKDAY_BASE.format(tenant=tenant, dc=dc)

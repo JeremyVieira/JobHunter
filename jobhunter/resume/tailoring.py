@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,22 @@ LANGUAGE_HEADERS = {"LANGUAGES", "LANGUES"}
 DATE_LINE_PATTERN = re.compile(r"(19|20)\d{2}")
 TAG_RE = re.compile(r"\s*\[tags?:\s*([^\]]*)\]\s*$", re.IGNORECASE)
 MAX_PROJECTS = 2
+
+# A bullet that is only a link ("Project repository: https://github.com/...") is entry
+# metadata: it is shown as a hyperlink in the entry heading, and must never be ranked as
+# evidence or quoted in a cover letter ("I project repository: https://...").
+LINK_BULLET_RE = re.compile(
+    r"^(?:(?:project\s+)?(?:repository|repo|source(?:\s+code)?|code|github|demo|live\s+demo|"
+    r"live\s+site|website|portfolio|link|d\u00e9p\u00f4t(?:\s+du\s+projet)?|d\u00e9p\u00f4t\s+github|"
+    r"code\s+source|site\s+web)\s*:\s*)?(https?://\S+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def link_bullet_url(text: str) -> str | None:
+    """The URL when ``text`` is a link-only bullet, else ``None``."""
+    match = LINK_BULLET_RE.match(strip_tags(text).strip())
+    return match.group(1).rstrip(".,;") if match else None
 
 VARIANTS_FILENAME = "summary_variants.json"
 
@@ -163,6 +180,7 @@ class Entry:
     end: int  # exclusive
     heading: str
     bullets: list[Bullet] = field(default_factory=list)
+    link_lines: list[int] = field(default_factory=list)  # link-only bullet line indexes
 
 
 @dataclass
@@ -198,6 +216,9 @@ def _parse_entries(lines: list[str], section: Section) -> list[Entry]:
             if current is None:
                 continue
             text, tags = split_tags(stripped[1:].strip())
+            if link_bullet_url(text):
+                current.link_lines.append(index)
+                continue
             current.bullets.append(Bullet(index, text.strip(), tags))
             continue
         starts_entry = is_project or not DATE_LINE_PATTERN.search(stripped)
@@ -358,6 +379,118 @@ def _reorder_skills_section(
     return lines[: section.start + 1] + rebuilt + lines[section.end :]
 
 
+
+# --------------------------------------------------------------------------
+# Section order
+# --------------------------------------------------------------------------
+_ONGOING_WORDS = ("current", "present", "ongoing", "now", "en cours", "actuel", "aujourd", "présent")
+LAYOUTS = ("keep", "auto", "experience-first", "education-first")
+
+
+def _section_key(header: str) -> str | None:
+    for key, headers in (
+        ("summary", SUMMARY_HEADERS),
+        ("experience", EXPERIENCE_HEADERS),
+        ("education", EDUCATION_HEADERS),
+        ("projects", PROJECT_HEADERS),
+        ("skills", SKILLS_HEADERS),
+        ("languages", LANGUAGE_HEADERS),
+    ):
+        if header in headers:
+            return key
+    return None
+
+
+def is_recent_graduate(lines: list[str], sections: list[Section], today: date | None = None) -> bool:
+    """True when the first education entry ended this year or last year (or is ongoing).
+
+    Recent graduates are best served by Education and Projects near the top; people with
+    more experience lead with Experience.
+    """
+    today = today or date.today()
+    education = next((s for s in sections if s.header in EDUCATION_HEADERS and s.entries), None)
+    if education is None:
+        return False
+    entry = education.entries[0]
+    years: list[int] = []
+    for index in range(entry.start + 1, entry.end):
+        text = lines[index].strip()
+        if text.startswith("-"):
+            continue
+        if any(word in text.lower() for word in _ONGOING_WORDS):
+            return True
+        years.extend(int(y) for y in re.findall(r"(?:19|20)\d{2}", text))
+    return bool(years) and today.year - max(years) <= 1
+
+
+def choose_section_order(
+    lines: list[str],
+    sections: list[Section],
+    weights: dict[str, float],
+    matcher: SkillMatcher,
+    family: str,
+    layout: str,
+    today: date | None = None,
+) -> list[str]:
+    """Section keys in display order for ``layout`` ("auto", "experience-first", "education-first")."""
+    experience_first = ["summary", "experience", "projects", "skills", "education", "languages"]
+    education_first = ["summary", "education", "skills", "projects", "experience", "languages"]
+    if layout == "experience-first":
+        return experience_first
+    if layout == "education-first":
+        return education_first
+    # auto: lead with the strongest evidence for this posting
+    if not is_recent_graduate(lines, sections, today):
+        return experience_first
+
+    def relevance(key: str) -> float:
+        headers = EXPERIENCE_HEADERS if key == "experience" else PROJECT_HEADERS
+        return sum(
+            entry_score(entry, weights, matcher)
+            for section in sections
+            if section.header in headers
+            for entry in section.entries
+        )
+
+    experience, projects = relevance("experience"), relevance("projects")
+    prefer_experience = experience > projects or (
+        experience == projects and family in {"support", "analyst"}
+    )
+    middle = ["experience", "projects"] if prefer_experience else ["projects", "experience"]
+    return ["summary", "education", "skills", *middle, "languages"]
+
+
+def reorder_sections(lines: list[str], sections: list[Section], order: list[str]) -> list[str]:
+    """Rebuild ``lines`` with the sections in ``order``; unknown sections keep their place last."""
+    if not sections:
+        return lines
+    preamble = lines[: sections[0].start]
+    buckets: dict[str, list[list[str]]] = {}
+    extras: list[list[str]] = []
+    for section in sections:
+        chunk = list(lines[section.start : section.end])
+        while chunk and not chunk[-1].strip():
+            chunk.pop()
+        key = _section_key(section.header)
+        if key is None:
+            extras.append(chunk)
+        else:
+            buckets.setdefault(key, []).append(chunk)
+    rebuilt = list(preamble)
+    while rebuilt and not rebuilt[-1].strip():
+        rebuilt.pop()
+    rebuilt.append("")
+    for key in order:
+        for chunk in buckets.pop(key, []):
+            rebuilt.extend([*chunk, ""])
+    for chunks in buckets.values():  # keys missing from ``order``
+        for chunk in chunks:
+            rebuilt.extend([*chunk, ""])
+    for chunk in extras:
+        rebuilt.extend([*chunk, ""])
+    return rebuilt
+
+
 # --------------------------------------------------------------------------
 # Main entry point
 # --------------------------------------------------------------------------
@@ -370,8 +503,16 @@ def tailor_resume_text(
     max_projects: int = MAX_PROJECTS,
     variants: dict[str, str] | None = None,
     matcher: SkillMatcher | None = None,
+    layout: str = "keep",
+    today: date | None = None,
 ) -> str:
-    """Return ``resume_text`` reordered/selected for the posting (tags stripped)."""
+    """Return ``resume_text`` reordered/selected for the posting (tags stripped).
+
+    ``layout`` controls section order: ``"keep"`` (default) leaves the master order,
+    ``"auto"`` puts Education and the strongest evidence first for recent graduates and
+    Experience first otherwise, and ``"experience-first"`` / ``"education-first"`` force
+    one order. Only ordering changes; no line is rewritten or added.
+    """
     target = f"{job_title}\n{job_description}".strip()
     if not target or not resume_text.strip():
         return strip_tags_from_text(resume_text)
@@ -390,14 +531,17 @@ def tailor_resume_text(
         if section.header not in EXPERIENCE_HEADERS | PROJECT_HEADERS:
             continue
         for entry in section.entries:
-            if len(entry.bullets) < 2:
+            if len(entry.bullets) < 2 and not entry.link_lines:
                 continue
             ranked = sorted(
                 enumerate(entry.bullets),
                 key=lambda pair: (-bullet_score(pair[1], weights, matcher), pair[0]),
             )
-            for slot, (_, bullet) in zip(entry.bullets, ranked, strict=True):
-                new_lines[slot.line_index] = lines[bullet.line_index]
+            # Real bullets fill the bullet slots in ranked order; link-only lines go last.
+            slots = sorted([b.line_index for b in entry.bullets] + entry.link_lines)
+            ordered = [bullet.line_index for _, bullet in ranked] + sorted(entry.link_lines)
+            for slot, source in zip(slots, ordered, strict=True):
+                new_lines[slot] = lines[source]
     lines = new_lines
 
     # 2) pick the most relevant projects (re-parse: line positions are unchanged)
@@ -430,6 +574,15 @@ def tailor_resume_text(
         variant = variants.get(family) or variants.get("default")
         if variant:
             lines = _apply_summary_variant(lines, sections, variant)
+            sections = parse_sections(lines)
+
+    # 5) section order (display only)
+    if layout != "keep":
+        if layout not in LAYOUTS:
+            raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
+        family = classify_role_family(job_title, job_description)
+        order = choose_section_order(lines, sections, weights, matcher, family, layout, today)
+        lines = reorder_sections(lines, sections, order)
 
     return strip_tags_from_text("\n".join(lines))
 

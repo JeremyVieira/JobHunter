@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **New resume design** for DOCX and PDF, modelled on recruiter-written resumes: centred header with one contact line (short link labels; no street address or postal code), accent-coloured company/project names, role on its own line, right-aligned dates, real bullets, numbers in bold, links on project headings, document metadata, and automatic fit to one page (largest of four size presets; a third project when it fits at 9.5 pt or larger). The cover letter DOCX uses the same letterhead.
+- **Section order** (`RESUME_LAYOUT`): by default recent graduates get Summary, Education, Skills, then Projects and Experience (strongest for the posting first); everyone else leads with Experience.
+- **`python -m jobhunter resume-audit`**: audits a master resume (privacy, missing measurable results, vague phrases, tense, project links, skills without evidence, date consistency) and prints a worksheet of questions for bullets with no measurable result. Never rewrites text or invents numbers.
+- `docs/RESUME_GUIDE.md`, `RESUME_INCLUDE_STREET_ADDRESS`, and a sample resume image generated from the fictional demo candidate.
+
+### Fixed
+- A link-only bullet such as `Project repository: https://...` was ranked as evidence, could outrank real bullets, and could be quoted in cover letters ("In my JobHunter project, I project repository: https://..."). Link-only bullets are now entry metadata, shown as a link on the heading.
+- The French resume printed the street address when it shared a line with the city.
+
+### Changed
+- The summary is rendered without a heading and left-aligned (justified text left uneven gaps).
+
 ## 2.0.0 - 2026-11-11
 
 ### Changed

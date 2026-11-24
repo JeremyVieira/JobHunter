@@ -6,6 +6,11 @@ from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any
 
+from jobhunter.config.defaults import (
+    KNOWN_ESTABLISHED_COMPANIES,
+    MANAGEMENT_TITLE_TERMS,
+    TINY_STARTUP_SIGNAL_TERMS,
+)
 from jobhunter.config.settings import SCORING_RULES, USER_PROFILE
 from jobhunter.matching.levels import is_entry_level
 from jobhunter.matching.requirements import (
@@ -24,18 +29,8 @@ from jobhunter.textutils import (
     normalize_text,
 )
 
-# Relative weights used when a config does not override them. Title, experience and
-# requirement coverage separate good from bad matches; the remaining dimensions are
-# nearly constant across postings, so they carry little weight.
 DEFAULT_SCORING_WEIGHTS = {
-    "title_match_weight": 24.0,
-    "experience_match_weight": 14.0,
-    "education_match_weight": 3.0,
-    "skills_match_weight": 30.0,
-    "salary_estimate_weight": 4.0,
-    "remote_preference_weight": 3.0,
-    "montreal_proximity_weight": 8.0,
-    "commute_preference_weight": 2.0,
+    key: float(value) for key, value in SCORING_RULES.items() if key.endswith("_weight")
 }
 
 
@@ -55,21 +50,6 @@ SENIOR_TITLE_TERMS = (
     "intermediate",
     "mid level",
     "advanced",
-)
-
-MANAGEMENT_TITLE_TERMS = (
-    "manager",
-    "director",
-    "vp",
-    "vice president",
-    "head of",
-    "chief",
-    "president",
-    "executive",
-    "general manager",
-    "gestionnaire",
-    "directeur",
-    "directrice",
 )
 
 # "Associate Product Manager" programs are entry-level despite the word "manager".
@@ -197,25 +177,6 @@ def salary_comparison(salary: str, job_title: str) -> dict[str, int | str | None
 
 # Self-described early-stage/tiny-team language. Kept in sync with
 # scraping.TINY_STARTUP_SIGNAL_TERMS.
-TINY_STARTUP_SIGNAL_TERMS = (
-    "pre-seed",
-    "seed stage",
-    "seed-stage",
-    "early stage startup",
-    "early-stage startup",
-    "small but mighty",
-    "wear many hats",
-    "founding engineer",
-    "founding team",
-    "series a startup",
-    "bootstrapped",
-    "small scrappy team",
-    "fast paced startup environment",
-    "we're a small team",
-    "we are a small team",
-)
-
-
 def company_size_penalty(
     job: dict[str, Any] | str,
     company_name_penalty: float = 15.0,
@@ -409,10 +370,13 @@ class CompositeScorer:
         self.prox_dim = MontrealProximityDimension()
         self.commute_dim = CommutePreferenceDimension()
 
-    def _get_config_val(self, key: str, default: float) -> float:
+    KNOWN_ESTABLISHED_COMPANIES = KNOWN_ESTABLISHED_COMPANIES
+
+    def _get_config_val(self, key: str, default: float | None = None) -> float:
+        fallback = SCORING_RULES[key] if default is None else default
         if isinstance(self.config, dict):
-            return float(self.config.get(key, default))
-        return float(getattr(self.config, key, default))
+            return float(self.config.get(key, fallback))
+        return float(getattr(self.config, key, fallback))
 
     def calculate_penalties(self, job: dict[str, Any]) -> float:
         title = normalize_text(job.get("title", ""))
@@ -476,56 +440,6 @@ class CompositeScorer:
     # Well-known, established employers (large, stable, publicly recognizable).
     # Not exhaustive - absence just means no bonus, it does not penalize the company.
     # Matched as whole words, so "ey" no longer matches Honeywell or Disney.
-    KNOWN_ESTABLISHED_COMPANIES = (
-        "rbc",
-        "royal bank",
-        "td bank",
-        "td canada trust",
-        "scotiabank",
-        "bmo",
-        "bank of montreal",
-        "national bank",
-        "desjardins",
-        "cmls",
-        "coveo",
-        "sun life",
-        "manulife",
-        "intact",
-        "cgi",
-        "cae",
-        "bombardier",
-        "air canada",
-        "hydro quebec",
-        "loto quebec",
-        "caisse de depot",
-        "bell canada",
-        "rogers",
-        "telus",
-        "videotron",
-        "shopify",
-        "lightspeed",
-        "nuvia",
-        "nuvei",
-        "ubisoft",
-        "ericsson",
-        "ibm",
-        "microsoft",
-        "google",
-        "amazon",
-        "meta",
-        "salesforce",
-        "sap",
-        "oracle",
-        "cisco",
-        "deloitte",
-        "pwc",
-        "ey",
-        "kpmg",
-        "accenture",
-        "loblaw",
-        "metro inc",
-        "canadian tire",
-    )
 
     def calculate_established_bonus(self, job: dict[str, Any]) -> float:
         company = normalize_text(job.get("company", ""))
@@ -625,9 +539,9 @@ class CompositeScorer:
         bilingual_bonus = 0.0
         language_penalty = 0.0
         if requirements.bilingual and {"en", "fr"} <= languages:
-            bilingual_bonus = self._get_config_val("bilingual_bonus", 4.0)
+            bilingual_bonus = self._get_config_val("bilingual_bonus")
         if requirements.language == "fr" and "fr" not in languages:
-            language_penalty = self._get_config_val("language_mismatch_penalty", 15.0)
+            language_penalty = self._get_config_val("language_mismatch_penalty")
 
         feedback_adjustment = (
             float(self.feedback.adjust(job_dict)) if self.feedback is not None else 0.0
@@ -649,10 +563,10 @@ class CompositeScorer:
         # Soft saturation: stacked bonuses on an already strong match used to clip at the
         # cap, so several excellent postings tied at exactly 100. Above ``soft_cap`` the
         # excess is compressed instead, which keeps the top of the ranking ordered.
-        soft_cap = self._get_config_val("soft_cap", 88.0)
+        soft_cap = self._get_config_val("soft_cap")
         if total > soft_cap:
             total = soft_cap + (total - soft_cap) * 0.35
-        max_score = self._get_config_val("max_score", 100.0)
+        max_score = self._get_config_val("max_score")
         fit = max(0, min(max_score, round(total, 2)))
         interview_chance = max(0, min(100, round((fit * 0.75) + (skill_score * 0.25), 2)))
         growth_potential = max(0, min(100, round((fit * 0.6) + 25, 2)))

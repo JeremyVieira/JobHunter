@@ -1,216 +1,87 @@
-from __future__ import annotations
+"""Resolve application settings from the environment.
+
+This is the application's only environment-parsing boundary. Existing uppercase
+exports are retained for integrations; new defaults belong in ``defaults.py``.
+"""
 
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from jobhunter.config import env
+from jobhunter.config.defaults import (
+    DEFAULT_COMPANY_CAREER_URLS,
+    DEFAULT_KEYWORDS,
+    DEFAULT_SCORING_RULES,
+    GREENHOUSE_SEED_BOARDS,
+    PRIORITY_TARGET_ROLES,
+    TARGET_ROLES,
+)
 from jobhunter.matching.inventory import resume_skill_ids
 from jobhunter.models import ScoringRulesConfig, UserProfile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BASE_DIR = Path(__file__).resolve().parents[1]
-
 load_dotenv(REPOSITORY_ROOT / ".env")
 
-
-def _path_from_env(name: str, default: Path) -> Path:
-    value = os.getenv(name, "").strip()
-    return Path(value).expanduser() if value else default
-
-
-def _list_from_env(name: str, default: list[str]) -> list[str]:
-    values = os.getenv(name, "").strip()
-    return [value.strip() for value in values.split(",") if value.strip()] if values else default
-
-
-def _int_from_env(name: str, default: int) -> int:
-    value = os.getenv(name, "").strip()
-    return int(value) if value else default
-
-
-JOB_SEARCH_TERMS = _list_from_env("JOB_SEARCH_TERMS", [])
-JOB_SEARCH_LOCATION = os.getenv("JOB_SEARCH_LOCATION", "Montreal, QC")
-JOBSPY_SITES = _list_from_env(
-    "JOBSPY_SITES", ["indeed", "linkedin", "zip_recruiter", "glassdoor", "google"]
-)
-
-# Where things live. Defaults keep everything inside the repository; the overrides let
-# demo mode use an isolated database without touching yours.
-DATA_DIR = _path_from_env("JOBHUNTER_DATA_DIR", BASE_DIR / "data")
-LOG_DIR = _path_from_env("JOBHUNTER_LOG_DIR", BASE_DIR / "logs")
-OUTPUT_DIR = _path_from_env("JOBHUNTER_OUTPUT_DIR", BASE_DIR / "outputs")
+DATA_DIR = env.path("JOBHUNTER_DATA_DIR", BASE_DIR / "data")
+LOG_DIR = env.path("JOBHUNTER_LOG_DIR", BASE_DIR / "logs")
+OUTPUT_DIR = env.path("JOBHUNTER_OUTPUT_DIR", BASE_DIR / "outputs")
 RESUME_DIR = OUTPUT_DIR / "resumes"
-DB_PATH = _path_from_env("JOBHUNTER_DB_PATH", DATA_DIR / "jobhunter.db")
-# Folder holding your private master_resume.txt / master_resume_fr.txt / summary_variants.json
-RESUME_SOURCE_DIR = _path_from_env("JOBHUNTER_RESUME_DIR", BASE_DIR / "resume")
+DB_PATH = env.path("JOBHUNTER_DB_PATH", DATA_DIR / "jobhunter.db")
+RESUME_SOURCE_DIR = env.path("JOBHUNTER_RESUME_DIR", BASE_DIR / "resume")
 
-USER_PROFILE_DATA = {
-    "name": os.getenv("USER_NAME", "Your Name"),
-    "location": os.getenv("USER_LOCATION", "Your City, Region"),
-    "email": os.getenv("USER_EMAIL", "your.email@example.com"),
-    "phone": os.getenv("USER_PHONE", ""),
-    "github": os.getenv("USER_GITHUB", ""),
-    "near_downtown_montreal": os.getenv("USER_NEAR_DOWNTOWN_MONTREAL", "false").lower() == "true",
-    "experience_years": _int_from_env("USER_EXPERIENCE_YEARS", 0),
-    "degree": os.getenv("USER_DEGREE", "Add your education"),
-    "experience_summary": os.getenv(
-        "USER_EXPERIENCE_SUMMARY", "Add a short summary of your relevant experience."
+_values = env.declare({
+    "JOB_SEARCH_TERMS": ("JOB_SEARCH_TERMS", env.string_list, ()),
+    "JOB_SEARCH_LOCATION": ("JOB_SEARCH_LOCATION", env.string, "Montreal, QC"),
+    "JOBSPY_SITES": ("JOBSPY_SITES", env.string_list, ("indeed", "linkedin", "zip_recruiter", "glassdoor", "google")),
+    "COMPANY_CAREER_URLS": ("COMPANY_CAREER_URLS", env.string_list, DEFAULT_COMPANY_CAREER_URLS),
+    "ADZUNA_APP_ID": ("ADZUNA_APP_ID", env.string, ""),
+    "ADZUNA_APP_KEY": ("ADZUNA_APP_KEY", env.string, ""),
+    "JOOBLE_API_KEY": ("JOOBLE_API_KEY", env.string, ""),
+    "MUSE_ENABLED": ("MUSE_ENABLED", env.boolean, True),
+    "JOBSPY_HOURS_OLD": ("JOBSPY_HOURS_OLD", env.integer, 72),
+    "JOBSPY_RESULTS_PER_TERM": ("JOBSPY_RESULTS_PER_TERM", env.integer, 15),
+    "JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS": ("JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS", env.boolean, True),
+    "MAX_JOB_AGE_DAYS": ("MAX_JOB_AGE_DAYS", env.integer, 14),
+    "VERIFY_LISTING_URLS": ("VERIFY_LISTING_URLS", env.boolean, True),
+    "MAX_LISTING_URL_CHECKS": ("MAX_LISTING_URL_CHECKS", env.integer, 40),
+    "LISTING_URL_TIMEOUT_SECONDS": ("LISTING_URL_TIMEOUT_SECONDS", env.number, 8.0),
+    "MAX_PERSISTED_JOBS": ("MAX_PERSISTED_JOBS", env.integer, 40),
+    "ENRICH_MAX_FETCHES": ("ENRICH_MAX_FETCHES", env.integer, 40),
+    "CAREER_PAGE_MAX_DETAIL_PAGES": ("CAREER_PAGE_MAX_DETAIL_PAGES", env.integer, 15),
+    "REQUEST_DELAY_SECONDS": ("REQUEST_DELAY_SECONDS", env.number, 0.3),
+    "RESUME_LAYOUT": ("RESUME_LAYOUT", env.string, "auto"),
+    "RESUME_INCLUDE_STREET_ADDRESS": ("RESUME_INCLUDE_STREET_ADDRESS", env.boolean, False),
+    "COLLECTION_HOUR": ("JOBHUNTER_COLLECTION_HOUR", env.integer, 8),
+    "COLLECTION_MINUTE": ("JOBHUNTER_COLLECTION_MINUTE", env.integer, 0),
+    "DASHBOARD_PORT": ("JOBHUNTER_DASHBOARD_PORT", env.integer, 8501),
+    "DASHBOARD_HOST": ("JOBHUNTER_DASHBOARD_HOST", env.string, "127.0.0.1"),
+    "DASHBOARD_HEADLESS": (
+        "JOBHUNTER_DASHBOARD_HEADLESS",
+        lambda name, default: (env.string(name).lower() in {"1", "true", "yes"}) if os.getenv(name) else default,
+        False,
     ),
-    # Languages the candidate works in (drives bilingual bonus / language mismatch penalty)
-    "languages": [lang.lower() for lang in _list_from_env("USER_LANGUAGES", ["en", "fr"])],
-    # Skill ids found in the local master resume files (empty when none exist)
-    "resume_skills": resume_skill_ids(
-        RESUME_SOURCE_DIR / "master_resume.txt", RESUME_SOURCE_DIR / "master_resume_fr.txt"
-    ),
-    "preferred_company_size": "medium",
-    "wants_stable_companies": True,
-    "prefers_hybrid_or_downtown": True,
-    "avoid_heavy_coding_roles": False,
-    "career_growth": True,
-    "salary_focus": True,
-    "target_roles": _list_from_env(
-        "USER_TARGET_ROLES",
-        [
-            # Core focus: junior software engineering, Python, automation, and ML roles
-            "Junior Software Engineer",
-            "Software Engineer I",
-            "Associate Software Engineer",
-            "Graduate Software Engineer",
-            "New Grad Software Engineer",
-            "Software Engineer",
-            "Junior Software Developer",
-            "Associate Software Developer",
-            "Software Developer",
-            "Python Developer",
-            "Junior Python Developer",
-            "Backend Developer",
-            "Backend Engineer",
-            "Junior Backend Developer",
-            "Full Stack Developer",
-            "Full Stack Engineer",
-            "Junior Full Stack Developer",
-            "Automation Engineer",
-            "Junior Automation Engineer",
-            "Test Automation Engineer",
-            "QA Automation Engineer",
-            "Junior Automation QA Engineer",
-            "Software QA Engineer",
-            "Machine Learning Engineer",
-            "Junior Machine Learning Engineer",
-            "ML Engineer",
-            "AI Engineer",
-            "Junior AI Engineer",
-            "Data Scientist",
-            "Junior Data Scientist",
-            "Data Engineer",
-            "Junior Data Engineer",
-            "Analytics Engineer",
-            "DevOps Engineer",
-            "Junior DevOps Engineer",
-            "Cloud Engineer",
-            "Site Reliability Engineer",
-            # Broader options, for a new grad who isn't too picky
-            "Business Analyst",
-            "Systems Analyst",
-            "Technical Systems Analyst",
-            "IT Business Analyst",
-            "Data Analyst",
-            "Business Intelligence Analyst",
-            "Product Analyst",
-            "QA Analyst",
-            "Quality Assurance Analyst",
-            "Test Analyst",
-            "Application Support Analyst",
-            "IT Support Analyst",
-            "Cloud Support Engineer",
-            "Cloud Operations Analyst",
-            "Functional Analyst",
-            "Analyste de systèmes",
-            "Analyste de données",
-            "Ingénieur logiciel junior",
-            "Développeur logiciel junior",
-        ],
-    ),
-    # Subset of target_roles ranked highest during scoring; analyst/support
-    # roles above remain valid matches but score below these when both are present.
-    "priority_target_roles": _list_from_env(
-        "USER_PRIORITY_TARGET_ROLES",
-        [
-            "Junior Software Engineer",
-            "Software Engineer I",
-            "Associate Software Engineer",
-            "Graduate Software Engineer",
-            "New Grad Software Engineer",
-            "Software Engineer",
-            "Junior Software Developer",
-            "Associate Software Developer",
-            "Software Developer",
-            "Python Developer",
-            "Junior Python Developer",
-            "Backend Developer",
-            "Backend Engineer",
-            "Junior Backend Developer",
-            "Full Stack Developer",
-            "Full Stack Engineer",
-            "Junior Full Stack Developer",
-            "Automation Engineer",
-            "Junior Automation Engineer",
-            "Test Automation Engineer",
-            "QA Automation Engineer",
-            "Junior Automation QA Engineer",
-            "Software QA Engineer",
-            "Machine Learning Engineer",
-            "Junior Machine Learning Engineer",
-            "ML Engineer",
-            "AI Engineer",
-            "Junior AI Engineer",
-            "Data Scientist",
-            "Junior Data Scientist",
-            "Data Engineer",
-            "Junior Data Engineer",
-            "Analytics Engineer",
-            "DevOps Engineer",
-            "Junior DevOps Engineer",
-            "Cloud Engineer",
-            "Site Reliability Engineer",
-            "Ingénieur logiciel junior",
-            "Développeur logiciel junior",
-        ],
-    ),
-    "keywords": _list_from_env(
-        "USER_KEYWORDS",
-        [
-            "python",
-            "automation",
-            "machine learning",
-            "data pipelines",
-            "pandas",
-            "numpy",
-            "scikit-learn",
-            "pytorch",
-            "pytest",
-            "unit testing",
-            "ci/cd",
-            "docker",
-            "rest api",
-            "sql",
-            "git",
-            "scripting",
-            "algorithms",
-            "data structures",
-            "cloud",
-            "agile",
-            "troubleshooting",
-            "excel",
-        ],
-    ),
-}
+    "DEMO_MODE": ("JOBHUNTER_DEMO", lambda name, default: os.getenv(name) == "1", False),
+})
+globals().update(_values)
+RESUME_LAYOUT = str(RESUME_LAYOUT).lower() or "auto"  # noqa: F821
 
-# Typed User Profile instance and backward-compatible dict
-PROFILE = UserProfile.from_dict(USER_PROFILE_DATA)
-USER_PROFILE = USER_PROFILE_DATA
+for _name, _env_name, _size, _default in (
+    ("GREENHOUSE_BOARDS", "GREENHOUSE_COMPANIES", 2, GREENHOUSE_SEED_BOARDS),
+    ("LEVER_BOARDS", "LEVER_COMPANIES", 2, ()),
+    ("ASHBY_BOARDS", "ASHBY_COMPANIES", 2, ()),
+    ("WORKABLE_BOARDS", "WORKABLE_COMPANIES", 2, ()),
+    ("SMARTRECRUITERS_BOARDS", "SMARTRECRUITERS_COMPANIES", 2, ()),
+    ("RECRUITEE_BOARDS", "RECRUITEE_COMPANIES", 2, ()),
+    ("WORKDAY_BOARDS", "WORKDAY_COMPANIES", 4, ()),
+    ("RSS_FEEDS", "RSS_FEEDS", 2, ()),
+):
+    _values[_name] = env.tuples(_env_name, _size, _default)
+globals().update(_values)
 
+JOBSPY_PROXIES = env.string_list("JOBSPY_PROXIES") or None
 JOB_SEARCH_URLS = [
     "https://www.linkedin.com/jobs/search/?keywords=Junior%20Software%20Engineer%20Python%20Montreal",
     "https://www.indeed.com/jobs?q=Junior+Software+Engineer+Python&l=Montreal%2C+QC",
@@ -219,117 +90,24 @@ JOB_SEARCH_URLS = [
     "https://www.workday.com/en-us/company/careers.html?search=Junior%20Software%20Engineer%20Montreal",
 ]
 
-# Public company career pages to check in addition to job boards. These pages
-# may expose JobPosting JSON-LD or static job links; JavaScript-only pages are
-# skipped safely and can be covered by the Greenhouse/Lever adapters.
-COMPANY_CAREER_URLS = _list_from_env(
-    "COMPANY_CAREER_URLS",
-    [
-        "Genetec|https://www.genetec.com/careers",
-        "CMLS Financial|https://www.cmls.ca/careers",
-        "Shopify|https://www.shopify.com/careers",
-        "Coveo|https://www.coveo.com/en/company/careers",
-        "Mila|https://mila.quebec/en/careers",
-        "Lightspeed|https://www.lightspeedhq.com/careers/",
-        "CAE|https://www.cae.com/careers/",
-        "Intact|https://careers.intactfc.com/",
-        "RBC|https://jobs.rbc.com/ca/en",
-        "TD Bank|https://jobs.td.com/en-CA/",
-        "Scotiabank|https://jobs.scotiabank.com/",
-        "BMO|https://jobs.bmo.com/",
-        "National Bank of Canada|https://emplois.bnc.ca/",
-        "Desjardins|https://www.desjardins.com/ca/about-us/careers/",
-    ],
-)
-
-
-# ---------------------------------------------------------------------------
-# Additional job sources. Every entry is optional; unset means "not used".
-# Formats (comma-separated in .env):
-#   *_COMPANIES   "Display Name|board-token"
-#   WORKDAY_COMPANIES   "Display Name|tenant|wd3|SiteName"
-#   RSS_FEEDS     "Feed Name|https://example.com/jobs.rss"
-# Use `python -m jobhunter.scraper.discover <careers-url>` to find tokens.
-# ---------------------------------------------------------------------------
-def _tuples_from_env(name: str, size: int, default: list[tuple[str, ...]] | None = None):
-    raw = os.getenv(name)
-    if raw is None:
-        return list(default or [])
-    parsed: list[tuple[str, ...]] = []
-    for entry in raw.split(","):
-        parts = tuple(part.strip() for part in entry.split("|"))
-        if len(parts) == size and all(parts):
-            parsed.append(parts)
-    return parsed
-
-
-GREENHOUSE_BOARDS = _tuples_from_env(
-    "GREENHOUSE_COMPANIES",
-    2,
-    [("Stripe", "stripe"), ("GitLab", "gitlab"), ("Databricks", "databricks")],
-)
-LEVER_BOARDS = _tuples_from_env("LEVER_COMPANIES", 2)
-ASHBY_BOARDS = _tuples_from_env("ASHBY_COMPANIES", 2)
-WORKABLE_BOARDS = _tuples_from_env("WORKABLE_COMPANIES", 2)
-SMARTRECRUITERS_BOARDS = _tuples_from_env("SMARTRECRUITERS_COMPANIES", 2)
-RECRUITEE_BOARDS = _tuples_from_env("RECRUITEE_COMPANIES", 2)
-WORKDAY_BOARDS = _tuples_from_env("WORKDAY_COMPANIES", 4)
-RSS_FEEDS = _tuples_from_env("RSS_FEEDS", 2)
-
-# Keyed aggregator APIs (free tiers). Skipped silently when no key is set.
-ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "").strip()
-ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "").strip()
-JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "").strip()
-MUSE_ENABLED = os.getenv("MUSE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
-
-# Collection behaviour
-JOBSPY_HOURS_OLD = _int_from_env("JOBSPY_HOURS_OLD", 72)
-JOBSPY_RESULTS_PER_TERM = _int_from_env("JOBSPY_RESULTS_PER_TERM", 15)
-JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS = os.getenv(
-    "JOBSPY_FETCH_LINKEDIN_DESCRIPTIONS", "true"
-).strip().lower() not in {"0", "false", "no", "off"}
-MAX_PERSISTED_JOBS = _int_from_env("MAX_PERSISTED_JOBS", 40)
-ENRICH_MAX_FETCHES = _int_from_env("ENRICH_MAX_FETCHES", 40)
-CAREER_PAGE_MAX_DETAIL_PAGES = _int_from_env("CAREER_PAGE_MAX_DETAIL_PAGES", 15)
-REQUEST_DELAY_SECONDS = float(os.getenv("REQUEST_DELAY_SECONDS", "0.3") or 0.3)
-
-SCORING_RULES_DATA = {
-    # Relative weights (normalized by their sum). Title, experience and requirement
-    # coverage separate good from bad matches; the rest are near-constant, so they
-    # carry little weight.
-    "title_match_weight": 24,
-    "experience_match_weight": 14,
-    "education_match_weight": 3,
-    "skills_match_weight": 30,
-    "salary_estimate_weight": 4,
-    "remote_preference_weight": 3,
-    "montreal_proximity_weight": 8,
-    "commute_preference_weight": 2,
-    "startup_penalty": 15,
-    "senior_developer_penalty": 25,
-    "seven_years_penalty": 20,
-    "tiny_company_description_penalty": 12,
-    "mid_level_numeral_penalty": 20,
-    "management_penalty": 40,
-    "entry_level_bonus": 8,
-    "culture_bonus": 6,
-    "established_bonus": 6,
-    "core_gap_penalty": 8,
-    "core_gap_penalty_cap": 20,
-    "bilingual_bonus": 4,
-    "language_mismatch_penalty": 15,
-    "freshness_bonus": 3,
-    "stale_penalty": 3,
-    "entry_level_min_fit_score": 55,
-    "soft_cap": 88,
-    "max_score": 100,
-}
-
-# Typed Scoring Rules instance and backward-compatible dict
-SCORING_CONFIG = ScoringRulesConfig.from_dict(SCORING_RULES_DATA)
-SCORING_RULES = SCORING_RULES_DATA
-
-# Optional proxy configuration for bypassing Cloudflare on Glassdoor & ZipRecruiter
-# Format: comma-separated list of proxy URLs, e.g. "http://user:pass@proxy1:port,http://user:pass@proxy2:port"
-_raw_proxies = os.getenv("JOBSPY_PROXIES", "").strip()
-JOBSPY_PROXIES = [p.strip() for p in _raw_proxies.split(",") if p.strip()] if _raw_proxies else None
+USER_PROFILE_DATA = UserProfile(
+    name=env.string("USER_NAME", "Your Name"),
+    location=env.string("USER_LOCATION", "Your City, Region"),
+    email=env.string("USER_EMAIL", "your.email@example.com"),
+    phone=env.string("USER_PHONE"),
+    github=env.string("USER_GITHUB"),
+    near_downtown_montreal=env.true_only("USER_NEAR_DOWNTOWN_MONTREAL"),
+    experience_years=env.integer("USER_EXPERIENCE_YEARS", 0),
+    degree=env.string("USER_DEGREE", "Add your education"),
+    experience_summary=env.string("USER_EXPERIENCE_SUMMARY", "Add a short summary of your relevant experience."),
+    languages=[language.lower() for language in env.string_list("USER_LANGUAGES", ("en", "fr"))],
+    resume_skills=resume_skill_ids(
+        RESUME_SOURCE_DIR / "master_resume.txt", RESUME_SOURCE_DIR / "master_resume_fr.txt"
+    ),
+    target_roles=env.string_list("USER_TARGET_ROLES", TARGET_ROLES),
+    priority_target_roles=env.string_list("USER_PRIORITY_TARGET_ROLES", PRIORITY_TARGET_ROLES),
+    keywords=env.string_list("USER_KEYWORDS", DEFAULT_KEYWORDS),
+).to_dict()
+USER_PROFILE = USER_PROFILE_DATA
+SCORING_RULES = dict(DEFAULT_SCORING_RULES)
+SCORING_CONFIG = ScoringRulesConfig.from_dict(SCORING_RULES)

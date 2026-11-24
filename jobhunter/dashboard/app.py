@@ -213,6 +213,19 @@ with tab_jobs:
                     f"({salary_market['family']}) | **{salary_market['comparison']}**"
                 )
             with header_col2:
+                outreach_key = f"outreach_open_{job['id']}_{idx}"
+                try:
+                    import private.outreach.ui  # noqa: F401
+
+                    if st.button(
+                        "🤝 Contact Recruiter",
+                        key=f"header_contact_{job['id']}_{idx}",
+                        width="stretch",
+                    ):
+                        st.session_state[outreach_key] = True
+                except ModuleNotFoundError:
+                    pass
+
                 if not docs_ready:
                     if st.button(
                         "⚡ Generate CV & Resume",
@@ -230,7 +243,7 @@ with tab_jobs:
                             st.rerun()
                 else:
                     en_pdf_path = Path(str(pack.get("en_resume_pdf", "")))
-                    if en_pdf_path.exists():
+                    if en_pdf_path.is_file():
                         st.download_button(
                             label="📥 Download Resume PDF",
                             data=en_pdf_path.read_bytes(),
@@ -239,6 +252,14 @@ with tab_jobs:
                             key=f"quick_dl_{job['id']}_{idx}",
                             width="stretch",
                         )
+
+            if st.session_state.get(f"outreach_open_{job['id']}_{idx}"):
+                try:
+                    from private.outreach.ui import render_outreach
+
+                    render_outreach(dict(job), idx)
+                except ModuleNotFoundError:
+                    st.session_state[f"outreach_open_{job['id']}_{idx}"] = False
 
             with st.expander(
                 "📄 View Application Pack, ATS Analysis & Job Details", expanded=False
@@ -348,7 +369,7 @@ with tab_jobs:
                         en_cov = Path(str(pack.get("en_cover_letter_docx", "")))
 
                         with d_col1:
-                            if en_pdf.exists():
+                            if en_pdf.is_file():
                                 st.download_button(
                                     "📥 Resume (PDF)",
                                     en_pdf.read_bytes(),
@@ -358,7 +379,7 @@ with tab_jobs:
                                     width="stretch",
                                 )
                         with d_col2:
-                            if en_docx.exists():
+                            if en_docx.is_file():
                                 st.download_button(
                                     "📄 Resume (DOCX)",
                                     en_docx.read_bytes(),
@@ -368,7 +389,7 @@ with tab_jobs:
                                     width="stretch",
                                 )
                         with d_col3:
-                            if en_cov.exists():
+                            if en_cov.is_file():
                                 st.download_button(
                                     "✉️ Cover Letter (DOCX)",
                                     en_cov.read_bytes(),
@@ -385,7 +406,7 @@ with tab_jobs:
                         fr_cov = Path(str(pack.get("fr_cover_letter_docx", "")))
 
                         with f_col1:
-                            if fr_pdf.exists():
+                            if fr_pdf.is_file():
                                 st.download_button(
                                     "📥 CV Français (PDF)",
                                     fr_pdf.read_bytes(),
@@ -395,7 +416,7 @@ with tab_jobs:
                                     width="stretch",
                                 )
                         with f_col2:
-                            if fr_docx.exists():
+                            if fr_docx.is_file():
                                 st.download_button(
                                     "📄 CV Français (DOCX)",
                                     fr_docx.read_bytes(),
@@ -405,7 +426,7 @@ with tab_jobs:
                                     width="stretch",
                                 )
                         with f_col3:
-                            if fr_cov.exists():
+                            if fr_cov.is_file():
                                 st.download_button(
                                     "✉️ Lettre de motivation (DOCX)",
                                     fr_cov.read_bytes(),

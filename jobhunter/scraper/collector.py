@@ -13,14 +13,30 @@ from bs4 import BeautifulSoup
 from jobspy import scrape_jobs
 
 from jobhunter.config import settings as _settings
+from jobhunter.config.defaults import (
+    COLLECTION_ESTABLISHED_COMPANIES,
+    MANAGEMENT_TITLE_TERMS,
+    TINY_STARTUP_SIGNAL_TERMS,
+)
+from jobhunter.config.defaults import (
+    DEFAULT_SEARCH_TERMS as DEFAULT_SEARCH_TERMS,
+)
 from jobhunter.config.settings import (
     COMPANY_CAREER_URLS,
+    GREENHOUSE_BOARDS,
     JOB_SEARCH_LOCATION,
     JOB_SEARCH_TERMS,
     JOBSPY_PROXIES,
     JOBSPY_SITES,
+    LEVER_BOARDS,
 )
-from jobhunter.textutils import contains_any_term, html_to_text, normalize_salary, normalize_text
+from jobhunter.textutils import (
+    contains_any_term,
+    days_since,
+    html_to_text,
+    normalize_salary,
+    normalize_text,
+)
 
 
 def _setting(name: str, default: Any) -> Any:
@@ -32,60 +48,11 @@ REMOTIVE_API_URL = "https://remotive.com/api/remote-jobs?limit=50"
 ARBEITNOW_API_URL = "https://www.arbeitnow.com/api/job-board-api"
 # All 5 major search boards supported by JobSpy
 JOBSPY_LOCATION = JOB_SEARCH_LOCATION
-DEFAULT_SEARCH_TERMS = [
-    "Junior Software Engineer",
-    "Software Engineer I",
-    "Associate Software Engineer",
-    "Graduate Software Engineer",
-    "New Grad Software Engineer",
-    "Software Engineer",
-    "Junior Software Developer",
-    "Software Developer",
-    "Python Developer",
-    "Junior Python Developer",
-    "Backend Developer",
-    "Backend Engineer",
-    "Junior Backend Developer",
-    "Full Stack Developer",
-    "Full Stack Engineer",
-    "Automation Engineer",
-    "Junior Automation Engineer",
-    "Test Automation Engineer",
-    "QA Automation Engineer",
-    "Machine Learning Engineer",
-    "Junior Machine Learning Engineer",
-    "ML Engineer",
-    "AI Engineer",
-    "Junior AI Engineer",
-    "Data Scientist",
-    "Junior Data Scientist",
-    "Data Engineer",
-    "Junior Data Engineer",
-    "DevOps Engineer",
-    "Junior DevOps Engineer",
-    "Cloud Engineer",
-    "Site Reliability Engineer",
-    "Développeur Python junior",
-]
+DEFAULT_SEARCH_TERMS = list(DEFAULT_SEARCH_TERMS)
+EXCLUDED_TITLE_TERMS = MANAGEMENT_TITLE_TERMS
+KNOWN_ESTABLISHED_COMPANIES = COLLECTION_ESTABLISHED_COMPANIES
 
-# Titles that are never a fit for a new-grad IC engineering search, no matter which
-# board or search term surfaced them (job boards frequently mix "related" postings
-# like Engineering Manager or Director of Engineering into results for "Software
-# Engineer" searches). Kept in sync with scoring.MANAGEMENT_TITLE_TERMS.
-EXCLUDED_TITLE_TERMS = (
-    "manager",
-    "director",
-    "vp",
-    "vice president",
-    "head of",
-    "chief",
-    "president",
-    "executive",
-    "general manager",
-    "gestionnaire",
-    "directeur",
-    "directrice",
-)
+# Titles that are never a fit are shared with the scoring hard filter.
 
 # Company-name fragments that signal the poster is hiding who they are, which
 # correlates strongly with low-quality or scammy postings (fake "confidential"
@@ -222,85 +189,7 @@ def _request_post(url: str, *, timeout: int = 20, **kwargs):
 
 # Companies large/stable enough that startup-culture language in their own JD (e.g.
 # "fast-paced") shouldn't count against them. Kept loosely in sync with
-# scoring.CompositeScorer.KNOWN_ESTABLISHED_COMPANIES; duplicated here so this file
-# has no import dependency on scoring.py.
-KNOWN_ESTABLISHED_COMPANIES = (
-    "rbc",
-    "royal bank",
-    "td bank",
-    "td canada trust",
-    "scotiabank",
-    "bmo",
-    "bank of montreal",
-    "national bank",
-    "desjardins",
-    "sun life",
-    "manulife",
-    "intact",
-    "cmls",
-    "coveo",
-    "cgi",
-    "cae",
-    "bombardier",
-    "air canada",
-    "hydro quebec",
-    "loto quebec",
-    "caisse de depot",
-    "bell canada",
-    "rogers",
-    "telus",
-    "videotron",
-    "shopify",
-    "lightspeed",
-    "nuvei",
-    "ubisoft",
-    "ericsson",
-    "ibm",
-    "microsoft",
-    "google",
-    "amazon",
-    "meta",
-    "salesforce",
-    "sap",
-    "oracle",
-    "cisco",
-    "deloitte",
-    "pwc",
-    "ey",
-    "kpmg",
-    "accenture",
-    "loblaw",
-    "metro inc",
-    "canadian tire",
-    "stripe",
-    "gitlab",
-    "databricks",
-    "figma",
-    "datadog",
-    "airbnb",
-    "spotify",
-)
-
-# Self-described early-stage/tiny-team language. Free job-board APIs don't expose
-# employee counts, so this is a best-effort proxy, not a real headcount check —
-# it only catches companies that describe themselves this way in the posting.
-TINY_STARTUP_SIGNAL_TERMS = (
-    "pre-seed",
-    "seed stage",
-    "seed-stage",
-    "early stage startup",
-    "early-stage startup",
-    "small but mighty",
-    "wear many hats",
-    "founding engineer",
-    "founding team",
-    "series a startup",
-    "bootstrapped",
-    "small scrappy team",
-    "fast paced startup environment",
-    "we're a small team",
-    "we are a small team",
-)
+KNOWN_ESTABLISHED_COMPANIES = COLLECTION_ESTABLISHED_COMPANIES
 
 
 def _normalize_for_filter(value: str) -> str:
@@ -829,16 +718,11 @@ LEVER_API_TEMPLATE = "https://api.lever.co/v0/postings/{token}?mode=json"
 # list — replace/extend with the specific companies you're actually targeting
 # (established employers you trust, ideally ones already on your radar).
 # Override with GREENHOUSE_COMPANIES / LEVER_COMPANIES in .env ("Name|token,Name|token").
-GREENHOUSE_COMPANIES: list[tuple[str, str]] = list(
-    _setting(
-        "GREENHOUSE_BOARDS",
-        [("Stripe", "stripe"), ("GitLab", "gitlab"), ("Databricks", "databricks")],
-    )
-)
+GREENHOUSE_COMPANIES: list[tuple[str, str]] = list(GREENHOUSE_BOARDS)
 
 # No confirmed-working Lever boards to ship as defaults (Figma left Lever, so its
 # token 404s) — set LEVER_COMPANIES="Name|token,..." in .env to enable this scraper.
-LEVER_COMPANIES: list[tuple[str, str]] = list(_setting("LEVER_BOARDS", []))
+LEVER_COMPANIES: list[tuple[str, str]] = list(LEVER_BOARDS)
 
 
 class GreenhouseScraper(BaseScraper):
@@ -1171,6 +1055,132 @@ def canonical_job_url(url: str) -> str:
     )
     path = parsed.path.rstrip("/") or "/"
     return urlunsplit((parsed.scheme.lower(), hostname, path, query, ""))
+
+
+AGGREGATOR_SOURCES = frozenset(
+    {
+        "adzuna",
+        "arbeitnow",
+        "glassdoor",
+        "google",
+        "indeed",
+        "jobicy",
+        "jobspy",
+        "jooble",
+        "linkedin",
+        "remotive",
+        "rss",
+        "themuse",
+        "zip_recruiter",
+    }
+)
+FIRST_PARTY_SOURCES = frozenset(
+    {
+        "ashby",
+        "company-career-page",
+        "greenhouse",
+        "lever",
+        "recruitee",
+        "smartrecruiters",
+        "workable",
+        "workday",
+    }
+)
+
+
+def filter_stale_jobs(
+    jobs: Iterable[dict[str, Any]],
+    *,
+    max_age_days: int | None = None,
+) -> list[dict[str, Any]]:
+    """Remove aggregated postings older than the configured recency window."""
+    limit = (
+        int(_setting("MAX_JOB_AGE_DAYS", 14))
+        if max_age_days is None
+        else max(0, int(max_age_days))
+    )
+    kept: list[dict[str, Any]] = []
+    for job in jobs:
+        source = str(job.get("source") or "").lower().split(":")[0]
+        if source not in AGGREGATOR_SOURCES:
+            kept.append(job)
+            continue
+        age = days_since(str(job.get("posting_date") or ""))
+        if age is not None and age > limit:
+            continue
+        kept.append(job)
+    return kept
+
+
+def verify_live_listings(
+    jobs: Iterable[dict[str, Any]],
+    *,
+    timeout: float | None = None,
+    max_checks: int | None = None,
+) -> list[dict[str, Any]]:
+    """Drop listings with explicit HTTP 404/410 responses.
+
+    403, 429, timeouts and anti-bot pages remain unverified but are kept: a blocked
+    listing cannot be proven stale, and false negatives are safer than hiding a real job.
+    """
+    if not bool(_setting("VERIFY_LISTING_URLS", True)):
+        return list(jobs)
+
+    request_timeout = (
+        float(_setting("LISTING_URL_TIMEOUT_SECONDS", 8))
+        if timeout is None
+        else timeout
+    )
+    check_limit = (
+        int(_setting("MAX_LISTING_URL_CHECKS", 40))
+        if max_checks is None
+        else max(0, int(max_checks))
+    )
+    kept: list[dict[str, Any]] = []
+    checks = 0
+    headers = dict(DEFAULT_HEADERS)
+    for job in jobs:
+        url = str(job.get("url") or "").strip()
+        source = str(job.get("source") or "").lower().split(":")[0]
+        if (
+            not url
+            or source in FIRST_PARTY_SOURCES
+            or source not in AGGREGATOR_SOURCES
+            or checks >= check_limit
+        ):
+            kept.append(job)
+            continue
+
+        checks += 1
+        try:
+            response = requests.head(
+                url,
+                headers=headers,
+                allow_redirects=True,
+                timeout=request_timeout,
+            )
+            if response.status_code in {405, 501}:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    allow_redirects=True,
+                    timeout=request_timeout,
+                    stream=True,
+                )
+            if response.status_code in {404, 410}:
+                continue
+        except (requests.ConnectionError, requests.Timeout):
+            pass
+        except requests.RequestException:
+            pass
+        kept.append(job)
+
+    return kept
+
+
+def freshen_jobs(jobs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    recency_filtered = filter_stale_jobs(jobs)
+    return verify_live_listings(recency_filtered)
 
 
 def collect_jobs_from_urls(urls: Iterable[str]) -> list[dict]:

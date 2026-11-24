@@ -4,60 +4,38 @@ from __future__ import annotations
 
 from typing import Any
 
-from jobhunter.config import settings as _settings
-from jobhunter.scraper.ats import (
+from jobhunter.config.registry import build_sources
+
+# Imported for re-export into ``globals()`` so ``build_sources`` can resolve them.
+from jobhunter.scraper.ats import (  # noqa: F401
     AshbyScraper,
     RecruiteeScraper,
     SmartRecruitersScraper,
     WorkableScraper,
     WorkdayScraper,
 )
-from jobhunter.scraper.boards import (
+from jobhunter.scraper.boards import (  # noqa: F401
     AdzunaScraper,
     JoobleScraper,
     RssFeedScraper,
     TheMuseScraper,
 )
 from jobhunter.scraper.collector import (
-    ArbeitnowScraper,
+    ArbeitnowScraper,  # noqa: F401
     BaseScraper,
-    CompanyCareerPageScraper,
-    GreenhouseScraper,
-    JobicyScraper,
-    JobSpyScraper,
-    LeverScraper,
-    RemotiveScraper,
+    CompanyCareerPageScraper,  # noqa: F401
+    GreenhouseScraper,  # noqa: F401
+    JobicyScraper,  # noqa: F401
+    JobSpyScraper,  # noqa: F401
+    LeverScraper,  # noqa: F401
+    RemotiveScraper,  # noqa: F401
 )
 
 
 def build_default_scrapers() -> list[BaseScraper]:
-    """Every source that is configured. Keyed APIs and empty board lists add nothing.
+    """Construct each configured source from the shared scraper registry."""
+    return build_sources(globals())
 
-    Aggregators (JobSpy, The Muse, Adzuna, Jooble, remote boards) give breadth; the
-    ATS adapters and company career pages give the employer's own, fresher postings.
-    """
-    scrapers: list[BaseScraper] = [
-        JobSpyScraper(),
-        TheMuseScraper(),
-        JobicyScraper(),
-        RemotiveScraper(),
-        ArbeitnowScraper(),
-        GreenhouseScraper(),
-        LeverScraper(),
-        AshbyScraper(),
-        WorkableScraper(),
-        SmartRecruitersScraper(),
-        RecruiteeScraper(),
-        WorkdayScraper(),
-        CompanyCareerPageScraper(),
-    ]
-    if getattr(_settings, "ADZUNA_APP_ID", "") and getattr(_settings, "ADZUNA_APP_KEY", ""):
-        scrapers.append(AdzunaScraper())
-    if getattr(_settings, "JOOBLE_API_KEY", ""):
-        scrapers.append(JoobleScraper())
-    if getattr(_settings, "RSS_FEEDS", []):
-        scrapers.append(RssFeedScraper())
-    return scrapers
 
 
 def describe_sources(scrapers: list[BaseScraper]) -> dict[str, Any]:

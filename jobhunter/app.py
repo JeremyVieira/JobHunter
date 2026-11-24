@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 from abc import ABC, abstractmethod
@@ -15,9 +14,14 @@ from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler  # noqa: E402
 
+from jobhunter.config.dashboard import configured_command
 from jobhunter.config.settings import (
     BASE_DIR,
+    COLLECTION_HOUR,
+    COLLECTION_MINUTE,
+    DASHBOARD_PORT,
     JOB_SEARCH_URLS,
+    MAX_JOB_AGE_DAYS,
     MAX_PERSISTED_JOBS,
     OUTPUT_DIR,
 )
@@ -29,6 +33,7 @@ from jobhunter.scraper.collector import (
     BaseScraper,
     canonical_job_url,
     collect_jobs_from_urls,
+    freshen_jobs,
 )
 from jobhunter.scraper.dedupe import dedupe_jobs
 from jobhunter.scraper.enrich import enrich_descriptions
@@ -40,12 +45,11 @@ from jobhunter.tracker.db import (
     purge_nonlocal_jobs,
     purge_placeholder_jobs,
     purge_red_flag_jobs,
+    purge_stale_jobs,
     save_jobs,
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_COLLECTION_HOUR = 8
-DEFAULT_COLLECTION_MINUTE = 0
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,7 @@ class CollectionDependencies:
     purge_placeholder_jobs: Callable[[], Any] = purge_placeholder_jobs
     purge_nonlocal_jobs: Callable[[], Any] = purge_nonlocal_jobs
     purge_red_flag_jobs: Callable[[], Any] = purge_red_flag_jobs
+    purge_stale_jobs: Callable[[int], Any] = purge_stale_jobs
     filter_applied_jobs: Callable[[Iterable[dict[str, Any]]], list[dict[str, Any]]] = (
         filter_applied_jobs
     )
@@ -119,6 +124,22 @@ class ExtractionStage(IPipelineStage):
         except Exception:
             LOGGER.exception("Description enrichment failed; scoring with available text.")
         context["raw_jobs"] = deduped
+        return context
+
+
+class FreshnessStage(IPipelineStage):
+    """Applies recency limits and best-effort live-link verification before scoring."""
+
+    def process(self, context: dict[str, Any]) -> dict[str, Any]:
+        raw_jobs = context.get("raw_jobs", [])
+        fresh_jobs = freshen_jobs(raw_jobs)
+        context["raw_jobs"] = fresh_jobs
+        context["removed_stale_or_dead"] = len(raw_jobs) - len(fresh_jobs)
+        LOGGER.info(
+            "Freshness stage kept %s postings; removed %s stale or dead listings.",
+            len(fresh_jobs),
+            context["removed_stale_or_dead"],
+        )
         return context
 
 
@@ -209,6 +230,7 @@ class JobCollectionPipeline:
             if stages is not None
             else [
                 ExtractionStage(),
+                FreshnessStage(),
                 ScoringStage(),
                 FilteringStage(),
                 PersistenceStage(dependencies=self.dependencies),
@@ -226,6 +248,7 @@ class JobCollectionPipeline:
             self.dependencies.purge_placeholder_jobs()
             self.dependencies.purge_nonlocal_jobs()
             self.dependencies.purge_red_flag_jobs()
+            self.dependencies.purge_stale_jobs(MAX_JOB_AGE_DAYS)
             context: dict[str, Any] = {}
             for stage in self.stages:
                 context = stage.process(context)
@@ -258,7 +281,7 @@ def run_scheduled_collection() -> None:
 
 
 def create_daily_scheduler(
-    hour: int = DEFAULT_COLLECTION_HOUR, minute: int = DEFAULT_COLLECTION_MINUTE
+    hour: int = COLLECTION_HOUR, minute: int = COLLECTION_MINUTE
 ) -> BackgroundScheduler:
     """Create a scheduler that collects jobs once a day at the requested local time."""
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
@@ -280,34 +303,17 @@ def create_daily_scheduler(
 
 def start_dashboard() -> subprocess.Popen:
     """Launch Streamlit as a child process so app.py remains the only command required."""
-    dashboard_path = BASE_DIR / "dashboard" / "app.py"
-    port = os.getenv("JOBHUNTER_DASHBOARD_PORT", "8501")
-    # Loopback by default: the dashboard has no login and shows personal job-search data.
-    host = os.getenv("JOBHUNTER_DASHBOARD_HOST", "127.0.0.1")
-    command = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(dashboard_path),
-        "--server.address",
-        host,
-        "--server.port",
-        port,
-        "--browser.gatherUsageStats",
-        "false",
-    ]
-    # Local runs open a browser tab; containers/servers set JOBHUNTER_DASHBOARD_HEADLESS=true.
-    if os.getenv("JOBHUNTER_DASHBOARD_HEADLESS", "").strip().lower() in {"1", "true", "yes"}:
-        command += ["--server.headless", "true"]
+    import jobhunter.config.settings as settings
+
+    command = configured_command(BASE_DIR, settings)
     return subprocess.Popen(command, cwd=BASE_DIR)
 
 
 def main() -> None:
     ensure_database()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    hour = int(os.getenv("JOBHUNTER_COLLECTION_HOUR", DEFAULT_COLLECTION_HOUR))
-    minute = int(os.getenv("JOBHUNTER_COLLECTION_MINUTE", DEFAULT_COLLECTION_MINUTE))
+    hour = COLLECTION_HOUR
+    minute = COLLECTION_MINUTE
     scheduler = create_daily_scheduler(hour, minute)
     # Dashboard first: the first collection can take minutes, so run it in the background
     # instead of making the app look unresponsive (and failing container health checks).
@@ -315,8 +321,7 @@ def main() -> None:
     scheduler.start()
     scheduler.add_job(run_scheduled_collection, id="startup-collection")
 
-    port = os.getenv("JOBHUNTER_DASHBOARD_PORT", "8501")
-    print(f"Dashboard available at http://localhost:{port}")
+    print(f"Dashboard available at http://localhost:{DASHBOARD_PORT}")
     print("Collecting jobs in the background; refresh the dashboard as results arrive.")
     print(f"Daily collection scheduled for {hour:02d}:{minute:02d} local time.")
     print("Press Ctrl+C to stop JobHunter.")

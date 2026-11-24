@@ -32,7 +32,7 @@ Your real data is never touched by demo mode.
 
 - **Collects widely.** JobSpy boards, employers' own ATS boards (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Workday), company career pages (the employer's ATS is detected automatically), The Muse, Adzuna, Jooble and any RSS feed. The same opening on several boards is merged, keeping the employer's own copy. Details: [docs/SOURCES.md](docs/SOURCES.md).
 - **Scores on evidence.** Requirement coverage (required vs. nice-to-have skills against what you can truthfully claim), title, years of experience, seniority, language, freshness and location, with a readable "Why this score" for every posting. See [docs/SCORING.md](docs/SCORING.md).
-- **Prepares honest documents.** Resumes are *selected and ordered* from your master resume, never rewritten. Cover letters are built from the bullets that match the posting; a company-specific line appears only if you write one. A verifier flags anything unsupported before you send it.
+- **Prepares honest documents.** One-page, ATS-friendly resumes laid out like a recruiter's (see [docs/RESUME_GUIDE.md](docs/RESUME_GUIDE.md)): *selected and ordered* from your master resume, never rewritten. Cover letters are built from the bullets that match the posting; a company-specific line appears only if you write one. A verifier flags anything unsupported before you send it.
 - **Learns from outcomes.** Record screening, interview, rejected or ghosted; the Funnel shows what actually works by score band, source and document language, and your applied/dismissed history gently adjusts future rankings.
 - **Stays private.** No account, no telemetry, no third-party AI service. The dashboard binds to localhost, and your files are git-ignored and excluded from built packages.
 
@@ -59,6 +59,7 @@ python -m pip install -r jobhunter/requirements.txt  # or: python -m pip install
 | `python -m jobhunter dashboard` | Dashboard only. |
 | `python -m jobhunter demo` | Explore everything with synthetic data. |
 | `python -m jobhunter doctor` | Check your setup and what to fix. |
+| `python -m jobhunter resume-audit` | Audit your master resume: privacy, missing results, weak bullets, skills without evidence. |
 | `python -m jobhunter discover "Name\|careers-url" --count` | Find a company's job-board settings from its careers page. |
 
 ## How it works
@@ -80,6 +81,10 @@ flowchart LR
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Honest by design
+
+![Sample generated resume](docs/images/resume-sample.png)
+
+*Generated from the fictional demo candidate.*
 
 - **Resume:** bullets are ranked by how well they evidence the posting, the most relevant projects are chosen from all of yours, and skill groups are reordered. Nothing is reworded or added. Optional `[tags: ...]` on a bullet help ranking and are never rendered; optional `summary_variants.json` lets you swap in your *own* pre-written summaries by role family.
 - **Cover letter:** built from matching resume bullets and your education line. If a posting requires something you lack (for example Java) and you have a related tool, the letter says so plainly instead of claiming the skill. Bilingual lines appear only when your resume supports them.
