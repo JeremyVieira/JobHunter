@@ -23,7 +23,7 @@ from jobhunter.resume.layout import (
     looks_like_street,
     parse_resume,
 )
-from jobhunter.resume.tailoring import SECTION_HEADERS, strip_tags
+from jobhunter.resume.selection import SECTION_HEADERS, strip_tags
 from jobhunter.textutils import detect_language, normalize_text
 
 ERROR, WARN, INFO = "error", "warn", "info"

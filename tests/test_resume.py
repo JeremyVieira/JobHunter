@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from jobhunter.resume import tailor
-from jobhunter.resume import tailoring as tailoring_module
-from jobhunter.resume.tailor import (
+from jobhunter.resume import pack as tailor
+from jobhunter.resume import selection as tailoring_module
+from jobhunter.resume.pack import (
     ats_analysis,
     export_cover_letter,
     export_resume_docx,
@@ -714,7 +714,7 @@ def test_get_application_pack_files():
 
 
 def test_get_application_pack_files_reports_partial_pack():
-    from jobhunter.resume.tailor import _application_pack_directory
+    from jobhunter.resume.pack import _application_pack_directory
 
     job = {
         "title": "Operations Analyst",

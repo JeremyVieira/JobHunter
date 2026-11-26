@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 
 from jobhunter.matching.skills import get_matcher
-from jobhunter.resume.tailoring import SECTION_HEADERS, strip_tags
+from jobhunter.resume.selection import SECTION_HEADERS, strip_tags
 from jobhunter.textutils import html_to_text, normalize_text
 
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?%?")

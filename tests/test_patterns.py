@@ -19,7 +19,7 @@ from jobhunter.filter import (
     TargetRolePredicate,
 )
 from jobhunter.models import JobListing, ScoringRulesConfig, UserProfile
-from jobhunter.resume.tailor import (
+from jobhunter.resume.pack import (
     DocxResumeExporter,
     PdfResumeExporter,
     ResumeParser,

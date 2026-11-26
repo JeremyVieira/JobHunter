@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import warnings
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -28,14 +27,14 @@ from jobhunter.resume.render import (
     build_letter_docx,
     choose_density,
 )
-from jobhunter.resume.tailoring import (
+from jobhunter.resume.selection import (
     DATE_LINE_PATTERN,
     SECTION_HEADERS,
     strip_tags,
     strip_tags_from_text,
     tailor_resume_text,
 )
-from jobhunter.resume.tailoring import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
+from jobhunter.resume.selection import SUMMARY_HEADERS as SUMMARY_SECTION_HEADERS
 from jobhunter.resume.verify import verify_letter, verify_resume
 from jobhunter.textutils import detect_language, mentions_bilingual
 
@@ -145,18 +144,7 @@ class ResumeParser:
         )
 
 
-class IResumeExporter(ABC):
-    """Abstract strategy for exporting resume documents in various file formats."""
-
-    @abstractmethod
-    def export(self, parsed: ParsedResume, output_path: Path) -> str: ...
-
-
-IResumeExporter.register(DocxResumeExporter)
-IResumeExporter.register(PdfResumeExporter)
-
-
-class TxtResumeExporter(IResumeExporter):
+class TxtResumeExporter:
     def export(self, parsed: ParsedResume, output_path: Path) -> str:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(parsed.raw_text, encoding="utf-8")
@@ -226,10 +214,20 @@ def prepare_resume_text(
     return text
 
 
-def _resume_blocks(resume_text: str) -> list[tuple[str, object]]:
-    """Convert the simple master-resume format into typed document blocks."""
-    parsed = ResumeParser.parse(resume_text)
-    return [(b.kind, b.value) for b in parsed.blocks]
+_RESUME_EXPORTERS = {
+    "txt": TxtResumeExporter,
+    "docx": DocxResumeExporter,
+    "pdf": PdfResumeExporter,
+}
+
+
+def _resume_output_path(
+    prefix: str, extension: str, company_name: str, language: str, output_dir: str | Path | None
+) -> Path:
+    target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
+    suffix = _language_suffix(language)
+    company_slug = _filename_component(company_name)
+    return target_dir / f"{prefix}_{company_slug}{suffix}.{extension}"
 
 
 def export_resume_docx(
@@ -240,13 +238,10 @@ def export_resume_docx(
     job_description: str = "",
 ) -> str:
     """Export a clean, ATS-friendly resume based on Harvard's bullet template."""
-    target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
-    suffix = _language_suffix(language)
-    company_slug = _filename_component(company_name)
-    file_path = target_dir / f"resume_{company_slug}{suffix}.docx"
-    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
-    parsed = ResumeParser.parse(resume_text)
-    return DocxResumeExporter().export(parsed, file_path)
+    return export_resume_files(
+        job_title, company_name, formats=["docx"], output_dir=output_dir,
+        language=language, job_description=job_description,
+    )["docx"]
 
 
 def export_resume_pdf(
@@ -257,13 +252,10 @@ def export_resume_pdf(
     job_description: str = "",
 ) -> str:
     """Export the same conservative, scan-friendly template as a PDF."""
-    target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
-    suffix = _language_suffix(language)
-    company_slug = _filename_component(company_name)
-    file_path = target_dir / f"resume_{company_slug}{suffix}.pdf"
-    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
-    parsed = ResumeParser.parse(resume_text)
-    return PdfResumeExporter().export(parsed, file_path)
+    return export_resume_files(
+        job_title, company_name, formats=["pdf"], output_dir=output_dir,
+        language=language, job_description=job_description,
+    )["pdf"]
 
 
 def export_resume_files(
@@ -273,25 +265,19 @@ def export_resume_files(
     output_dir: str | Path | None = None,
     language: str = "en",
     job_description: str = "",
+    resume_text: str | None = None,
 ):
     target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
     target_dir.mkdir(parents=True, exist_ok=True)
     wanted_formats = formats or ["txt", "docx", "pdf"]
-    result = {}
-    suffix = _language_suffix(language)
-    company_slug = _filename_component(company_name)
-    resume_text = prepare_resume_text(job_title, company_name, language, job_description)
+    if resume_text is None:
+        resume_text = prepare_resume_text(job_title, company_name, language, job_description)
     parsed = ResumeParser.parse(resume_text)
 
-    if "txt" in wanted_formats:
-        txt_file = target_dir / f"resume_{company_slug}{suffix}.txt"
-        result["txt"] = TxtResumeExporter().export(parsed, txt_file)
-    if "docx" in wanted_formats:
-        docx_file = target_dir / f"resume_{company_slug}{suffix}.docx"
-        result["docx"] = DocxResumeExporter().export(parsed, docx_file)
-    if "pdf" in wanted_formats:
-        pdf_file = target_dir / f"resume_{company_slug}{suffix}.pdf"
-        result["pdf"] = PdfResumeExporter().export(parsed, pdf_file)
+    result = {}
+    for fmt in wanted_formats:
+        file_path = _resume_output_path("resume", fmt, company_name, language, target_dir)
+        result[fmt] = _RESUME_EXPORTERS[fmt]().export(parsed, file_path)
     return result
 
 
@@ -352,9 +338,7 @@ def export_cover_letter(
 ) -> str:
     target_dir = Path(output_dir) if output_dir is not None else OUTPUT_DIR / "resumes"
     target_dir.mkdir(parents=True, exist_ok=True)
-    suffix = _language_suffix(language)
-    company_slug = _filename_component(company_name)
-    file_path = target_dir / f"cover_letter_{company_slug}{suffix}.docx"
+    file_path = _resume_output_path("cover_letter", "docx", company_name, language, target_dir)
     letter = (
         generate_cover_letter_french(job_title, company_name, job_description, company_hook)
         if language == "fr"
@@ -420,6 +404,7 @@ def generate_application_pack(
     }
     warnings_found: list[str] = []
     for language in wanted:
+        tailored = prepare_resume_text(job_title, company_name, language, description)
         files = export_resume_files(
             job_title,
             company_name,
@@ -427,6 +412,7 @@ def generate_application_pack(
             output_dir=pack_dir,
             language=language,
             job_description=description,
+            resume_text=tailored,
         )
         cover = export_cover_letter(
             job_title,
@@ -441,7 +427,6 @@ def generate_application_pack(
         result[f"{language}_cover_letter_docx"] = cover
 
         master = build_master_resume(language)
-        tailored = prepare_resume_text(job_title, company_name, language, description)
         # Summary variants are user-authored; anything else off-master is flagged.
         from_variants = _summary_variant_lines(language)
         for issue in verify_resume(tailored, master, allowed_extra_lines=from_variants):
@@ -483,7 +468,7 @@ def read_verification_warnings(report_path: str | Path | None) -> list[str]:
 
 
 def _summary_variant_lines(language: str) -> list[str]:
-    from jobhunter.resume.tailoring import load_summary_variants
+    from jobhunter.resume.selection import load_summary_variants
 
     return list(load_summary_variants(language).values())
 
@@ -507,9 +492,7 @@ def get_application_pack_files(
         for key, name in _pack_file_names(company_slug, language).items():
             paths[key] = target_dir / name
 
-    expected_files = [
-        paths[key] for language in wanted for key in _pack_file_names(company_slug, language)
-    ]
+    expected_files = [path for key, path in paths.items() if key[:2] in wanted]
     complete = all(path.exists() for path in expected_files)
     exists = any(path.exists() for path in paths.values())
     report = target_dir / "verification_report.txt"

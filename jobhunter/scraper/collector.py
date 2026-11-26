@@ -15,11 +15,9 @@ from jobspy import scrape_jobs
 from jobhunter.config import settings as _settings
 from jobhunter.config.defaults import (
     COLLECTION_ESTABLISHED_COMPANIES,
+    DEFAULT_SEARCH_TERMS,
     MANAGEMENT_TITLE_TERMS,
     TINY_STARTUP_SIGNAL_TERMS,
-)
-from jobhunter.config.defaults import (
-    DEFAULT_SEARCH_TERMS as DEFAULT_SEARCH_TERMS,
 )
 from jobhunter.config.settings import (
     COMPANY_CAREER_URLS,
@@ -46,14 +44,6 @@ def _setting(name: str, default: Any) -> Any:
 JOBICY_API_URL = "https://jobicy.com/api/v2/remote-jobs?count=50"
 REMOTIVE_API_URL = "https://remotive.com/api/remote-jobs?limit=50"
 ARBEITNOW_API_URL = "https://www.arbeitnow.com/api/job-board-api"
-# All 5 major search boards supported by JobSpy
-JOBSPY_LOCATION = JOB_SEARCH_LOCATION
-DEFAULT_SEARCH_TERMS = list(DEFAULT_SEARCH_TERMS)
-EXCLUDED_TITLE_TERMS = MANAGEMENT_TITLE_TERMS
-KNOWN_ESTABLISHED_COMPANIES = COLLECTION_ESTABLISHED_COMPANIES
-
-# Titles that are never a fit are shared with the scoring hard filter.
-
 # Company-name fragments that signal the poster is hiding who they are, which
 # correlates strongly with low-quality or scammy postings (fake "confidential"
 # listings, resume-harvesting, recruiting-agency spam with no real employer named).
@@ -110,16 +100,19 @@ def _with_default_headers(kwargs: dict) -> dict:
     return kwargs
 
 
-def _request_get(url: str, *, timeout: int = 20, **kwargs):
+def _request_with_retries(method: str, url: str, *, timeout: int = 20, **kwargs):
+    """GET/POST with the same retry/backoff policy; honours ``Retry-After``."""
     kwargs = _with_default_headers(kwargs)
+    request = requests.get if method == "get" else requests.post
     for attempt in range(1, MAX_GET_ATTEMPTS + 1):
         try:
-            response = requests.get(url, timeout=timeout, **kwargs)
+            response = request(url, timeout=timeout, **kwargs)
         except (requests.ConnectionError, requests.Timeout):
             if attempt == MAX_GET_ATTEMPTS:
                 raise
             LOGGER.warning(
-                "GET request failed on attempt %s/%s: %s",
+                "%s request failed on attempt %s/%s: %s",
+                method.upper(),
                 attempt,
                 MAX_GET_ATTEMPTS,
                 url,
@@ -127,7 +120,6 @@ def _request_get(url: str, *, timeout: int = 20, **kwargs):
             )
             time.sleep(0.25 * 2 ** (attempt - 1))
             continue
-
         status_code = getattr(response, "status_code", 200)
         if status_code in RETRYABLE_STATUS_CODES and attempt < MAX_GET_ATTEMPTS:
             retry_after = getattr(response, "headers", {}).get("Retry-After", "")
@@ -136,7 +128,8 @@ def _request_get(url: str, *, timeout: int = 20, **kwargs):
             except (TypeError, ValueError):
                 delay = 0.25 * 2 ** (attempt - 1)
             LOGGER.warning(
-                "GET request received HTTP %s on attempt %s/%s: %s",
+                "%s request received HTTP %s on attempt %s/%s: %s",
+                method.upper(),
                 status_code,
                 attempt,
                 MAX_GET_ATTEMPTS,
@@ -144,11 +137,19 @@ def _request_get(url: str, *, timeout: int = 20, **kwargs):
             )
             time.sleep(delay)
             continue
-
         response.raise_for_status()
         return response
+    raise RuntimeError(
+        f"{method.upper()} request failed after {MAX_GET_ATTEMPTS} attempts: {url}"
+    )
 
-    raise RuntimeError(f"GET request failed after {MAX_GET_ATTEMPTS} attempts: {url}")
+
+def _request_get(url: str, *, timeout: int = 20, **kwargs):
+    return _request_with_retries("get", url, timeout=timeout, **kwargs)
+
+
+def _request_post(url: str, *, timeout: int = 20, **kwargs):
+    return _request_with_retries("post", url, timeout=timeout, **kwargs)
 
 
 REQUEST_DELAY_SECONDS = float(_setting("REQUEST_DELAY_SECONDS", 0.3))
@@ -160,36 +161,8 @@ def _polite_sleep() -> None:
         time.sleep(REQUEST_DELAY_SECONDS)
 
 
-def _request_post(url: str, *, timeout: int = 20, **kwargs):
-    """POST with the same retry/backoff policy as ``_request_get``."""
-    kwargs = _with_default_headers(kwargs)
-    for attempt in range(1, MAX_GET_ATTEMPTS + 1):
-        try:
-            response = requests.post(url, timeout=timeout, **kwargs)
-        except (requests.ConnectionError, requests.Timeout):
-            if attempt == MAX_GET_ATTEMPTS:
-                raise
-            LOGGER.warning(
-                "POST request failed on attempt %s/%s: %s",
-                attempt,
-                MAX_GET_ATTEMPTS,
-                url,
-                exc_info=True,
-            )
-            time.sleep(0.25 * 2 ** (attempt - 1))
-            continue
-        status_code = getattr(response, "status_code", 200)
-        if status_code in RETRYABLE_STATUS_CODES and attempt < MAX_GET_ATTEMPTS:
-            time.sleep(0.25 * 2 ** (attempt - 1))
-            continue
-        response.raise_for_status()
-        return response
-    raise RuntimeError(f"POST request failed after {MAX_GET_ATTEMPTS} attempts: {url}")
-
-
 # Companies large/stable enough that startup-culture language in their own JD (e.g.
 # "fast-paced") shouldn't count against them. Kept loosely in sync with
-KNOWN_ESTABLISHED_COMPANIES = COLLECTION_ESTABLISHED_COMPANIES
 
 
 def _normalize_for_filter(value: str) -> str:
@@ -203,7 +176,7 @@ def is_excluded_title(title: str) -> bool:
     text = _normalize_for_filter(title)
     if contains_any_term(text, ("associate product manager", "apm")):
         return False
-    return contains_any_term(text, EXCLUDED_TITLE_TERMS)
+    return contains_any_term(text, MANAGEMENT_TITLE_TERMS)
 
 
 def is_shady_posting(job: dict[str, Any]) -> bool:
@@ -229,7 +202,7 @@ def is_likely_tiny_startup(job: dict[str, Any]) -> bool:
     will under-flag (a real tiny startup that doesn't say so in the JD slips
     through) but should rarely over-flag a genuinely established employer."""
     company = _normalize_for_filter(job.get("company", ""))
-    if contains_any_term(company, KNOWN_ESTABLISHED_COMPANIES):
+    if contains_any_term(company, COLLECTION_ESTABLISHED_COMPANIES):
         return False
     if contains_any_term(company, ("labs", "forge", "ventures", "startup")):
         return True
@@ -623,7 +596,7 @@ class JobSpyScraper(BaseScraper):
         hours_old: int | None = None,
         fetch_linkedin_descriptions: bool | None = None,
     ):
-        self.search_terms = search_terms or JOB_SEARCH_TERMS or DEFAULT_SEARCH_TERMS
+        self.search_terms = search_terms or JOB_SEARCH_TERMS or list(DEFAULT_SEARCH_TERMS)
         self.results_wanted_per_term = (
             results_wanted_per_term
             if results_wanted_per_term is not None
@@ -866,11 +839,7 @@ class ScraperFactory:
 
 
 def fetch_job_page(url: str, timeout: int = 20) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    response = _request_get(url, headers=headers, timeout=timeout)
+    response = _request_get(url, timeout=timeout)
     return response.text
 
 
@@ -896,36 +865,6 @@ def fetch_lever_jobs(
     companies: list[tuple[str, str]] | None = None, timeout: int = 20
 ) -> list[dict]:
     return LeverScraper(companies=companies, timeout=timeout).scrape()
-
-
-def fetch_all_jobs(
-    jobspy_search_terms: list[str] | None = None,
-    greenhouse_companies: list[tuple[str, str]] | None = None,
-    lever_companies: list[tuple[str, str]] | None = None,
-    exclude_tiny_startups: bool = True,
-) -> list[dict]:
-    """Run every scraper (job boards + direct-from-company-website ATS feeds),
-    merge and de-dupe by URL, then apply filter_relevant_jobs(). This is the
-    one-stop entry point for "scour everything, but keep it clean."
-    """
-    all_jobs: list[dict[str, Any]] = []
-    all_jobs.extend(fetch_jobicy_jobs())
-    all_jobs.extend(fetch_remotive_jobs())
-    all_jobs.extend(fetch_arbeitnow_jobs())
-    all_jobs.extend(fetch_jobspy_jobs(search_terms=jobspy_search_terms))
-    all_jobs.extend(fetch_greenhouse_jobs(companies=greenhouse_companies))
-    all_jobs.extend(fetch_lever_jobs(companies=lever_companies))
-
-    seen_urls: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-    for job in all_jobs:
-        url = job.get("url", "")
-        if url and url in seen_urls:
-            continue
-        seen_urls.add(url)
-        deduped.append(job)
-
-    return filter_relevant_jobs(deduped, exclude_tiny_startups=exclude_tiny_startups)
 
 
 def _jobspy_text(value, default: str = "") -> str:
@@ -1263,8 +1202,3 @@ def build_example_jobs() -> list[dict]:
             "source": "demo",
         },
     ]
-
-
-def save_jobs_to_json(jobs: list[dict], path: str):
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(jobs, file, indent=2, ensure_ascii=False)

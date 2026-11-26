@@ -12,7 +12,7 @@ from jobhunter.app import run_daily_collection
 from jobhunter.config.settings import USER_PROFILE
 from jobhunter.doctor import FAIL, OK, run_checks
 from jobhunter.matching.skills import label_for
-from jobhunter.resume.tailor import (
+from jobhunter.resume.pack import (
     ats_analysis,
     build_master_resume,
     generate_application_pack,
@@ -43,8 +43,6 @@ def as_job_dict(job):
     """Normalize SQLite row objects and dict-like records to a plain dict."""
     if job is None:
         return {}
-    if hasattr(job, "keys"):
-        return dict(job)
     return dict(job)
 
 

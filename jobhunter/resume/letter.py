@@ -19,7 +19,7 @@ from jobhunter.matching.requirements import (
     compare_requirements,
 )
 from jobhunter.matching.skills import SkillMatcher, get_matcher
-from jobhunter.resume.tailoring import (
+from jobhunter.resume.selection import (
     EDUCATION_HEADERS,
     EXPERIENCE_HEADERS,
     LANGUAGE_HEADERS,

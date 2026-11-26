@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from jobhunter.resume.tailoring import (
+from jobhunter.resume.selection import (
     DATE_LINE_PATTERN,
     EDUCATION_HEADERS,
     EXPERIENCE_HEADERS,

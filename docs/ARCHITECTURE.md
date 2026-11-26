@@ -45,7 +45,7 @@ flowchart LR
 | `matching/` | Skill taxonomy (`skills.py`), posting analysis and candidate comparison (`requirements.py`), seniority (`levels.py`), resume skill inventory. |
 | `scoring/` | `engine.py` (composite scorer) and `feedback.py` (preference learning). |
 | `filter.py` | Predicate-based hard filters. |
-| `resume/` | `tailoring.py` (rank/select), `letter.py` (cover letters), `verify.py` (fabrication checks), `tailor.py` (parsing, export, packs). |
+| `resume/` | `selection.py` (rank/select), `letter.py` (cover letters), `verify.py` (fabrication checks), `pack.py` (parsing, export, packs). |
 | `tracker/db.py` | SQLite repositories, application lifecycle, funnel statistics. |
 | `dashboard/app.py` | Streamlit UI. |
 | `demo.py`, `doctor.py`, `cli.py` | Demo workspace, setup diagnostics, `python -m jobhunter` entry point. |
