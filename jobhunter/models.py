@@ -45,6 +45,11 @@ class JobListing:
         return cls(**filtered)
 
 
+def as_job_dict(job: dict[str, Any] | JobListing) -> dict[str, Any]:
+    """Normalize a JobListing or plain mapping to a plain dict."""
+    return job.to_dict() if isinstance(job, JobListing) else dict(job)
+
+
 @dataclass
 class ScoreBreakdown:
     """Detailed breakdown of fit score calculations for transparency and auditability."""

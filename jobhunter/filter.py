@@ -6,7 +6,7 @@ from typing import Any
 
 from jobhunter.config.settings import USER_PROFILE
 from jobhunter.matching.levels import is_entry_level
-from jobhunter.models import JobListing, UserProfile
+from jobhunter.models import JobListing, UserProfile, as_job_dict
 from jobhunter.textutils import contains_any_term, normalize_text
 
 
@@ -360,7 +360,7 @@ class FilterChain:
     def apply(self, jobs: Iterable[dict[str, Any] | JobListing]) -> list[dict[str, Any]]:
         filtered: list[dict[str, Any]] = []
         for job in jobs:
-            job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
+            job_dict = as_job_dict(job)
             if all(predicate.evaluate(job_dict) for predicate in self.predicates):
                 filtered.append(job_dict)
         return sorted(filtered, key=lambda item: float(item.get("fit_score", 0) or 0), reverse=True)

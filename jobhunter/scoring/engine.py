@@ -20,7 +20,7 @@ from jobhunter.matching.requirements import (
     skill_score_from_match,
 )
 from jobhunter.matching.skills import expand_inventory, get_matcher
-from jobhunter.models import JobListing, ScoringRulesConfig, UserProfile
+from jobhunter.models import JobListing, ScoringRulesConfig, UserProfile, as_job_dict
 from jobhunter.textutils import (
     contains_any_term,
     days_since,
@@ -431,7 +431,7 @@ class CompositeScorer:
         return 0.0
 
     def score_job(self, job: dict[str, Any] | JobListing) -> dict[str, Any]:
-        job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
+        job_dict = as_job_dict(job)
 
         profile = self.profile
         title_score = float(title_match_score(job_dict.get("title", ""), profile=profile))
@@ -775,7 +775,7 @@ def score_jobs(
     scorer = _default_scorer if feedback is None else CompositeScorer(feedback=feedback)
     scored = []
     for job in jobs:
-        job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
+        job_dict = as_job_dict(job)
         if exclude_mismatched and is_clearly_mismatched(job_dict):
             continue
         scores = scorer.score_job(job_dict)

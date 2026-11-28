@@ -20,6 +20,10 @@
 - Internal: the 130-entry `SKILLS` taxonomy moved from `matching/skills.py` to `matching/skills_data.json` (loaded at import, also shipped as package data). `skills.py` shrank from 659 to ~200 lines; the public names (`SKILLS`, `SkillMatcher`, `get_matcher`, `expand_inventory`, `skill_text`, `label_for`) are unchanged and tests pass as-is.
 - Internal: the duplicate `_text()` HTML helpers in `scraper/ats.py` and `scraper/boards.py` now come from one shared `textutils.bs4_text()`; `_suppress_jobspy_loggers()` uses `importlib.import_module` instead of `__import__`.
 - Internal: runtime data now defaults to the repository root (`data/`, `logs/`, `outputs/`) instead of inside the `jobhunter/` package; the `JOBHUNTER_DATA_DIR`/`JOBHUNTER_LOG_DIR`/`JOBHUNTER_OUTPUT_DIR`/`JOBHUNTER_DB_PATH` env overrides are unchanged, so set them to point at an existing database if you upgrade in place.
+- Internal: `tracker/db.py` connection boilerplate (19 `conn = ... / try / finally: conn.close()` blocks) collapsed into one `_open_connection()` context manager; the per-class `_get_connection()` shims were removed. Behavior is identical (the zero-arg `get_connection()` fallback used by tests is preserved inside the helper).
+- Internal: the repeated `job.to_dict() if isinstance(job, JobListing) else dict(job)` idiom in `filter.py`, `scoring/engine.py`, and `tracker/db.py` is now a single `models.as_job_dict()` helper.
+- Internal: remaining inline `BeautifulSoup(...).get_text(" ", strip=True)` description cleanups in `scraper/collector.py` now use the shared `textutils.bs4_text()`.
+- Internal: the near-identical `JobicyScraper`/`RemotiveScraper`/`ArbeitnowScraper` in `scraper/collector.py` now share one `JsonApiScraper` template-method base (request, required-field validation, and normalization loop live in one place); each subclass only declares its JSON keys and per-source quirks (salary, location, remote flag). `JobicyScraper` no longer swallows request errors, matching the other two sources; class names and the `collector` module API are unchanged, so tests pass as-is.
 
 ## 2.0.0 - 2026-11-11
 

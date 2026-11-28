@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from jobhunter.config.settings import DB_PATH
 from jobhunter.filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
-from jobhunter.models import ApplicationRecord, JobListing
+from jobhunter.models import ApplicationRecord, JobListing, as_job_dict
 from jobhunter.scraper.dedupe import identity
 from jobhunter.textutils import parse_posting_date
 
@@ -51,6 +52,19 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _open_connection(db_path: Path | str | None = None):
+    """Yield a connection, closing it on exit (zero-arg get_connection fallback for tests)."""
+    try:
+        conn = get_connection(db_path)
+    except TypeError:
+        conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def _serialize_details(value: Any) -> str | None:
     if value is None or value == "":
         return None
@@ -78,15 +92,8 @@ class SQLiteJobRepository:
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = Path(db_path)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        try:
-            return get_connection(self.db_path)
-        except TypeError:
-            return get_connection()
-
     def ensure_schema(self) -> None:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -139,21 +146,15 @@ class SQLiteJobRepository:
                 """
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def save(self, job: JobListing | dict[str, Any]) -> int:
         return self.save_many([job])
 
     def save_many(self, jobs: Iterable[JobListing | dict[str, Any]]) -> int:
         count = 0
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             for job in jobs:
-                if isinstance(job, JobListing):
-                    job_dict = job.to_dict()
-                else:
-                    job_dict = dict(job)
+                job_dict = as_job_dict(job)
 
                 conn.execute(
                     """
@@ -210,14 +211,11 @@ class SQLiteJobRepository:
                 )
                 count += 1
             conn.commit()
-        finally:
-            conn.close()
         return count
 
     def purge_placeholders(self) -> int:
         """Remove historic records that are not actual job postings."""
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM jobs
@@ -229,8 +227,6 @@ class SQLiteJobRepository:
             )
             conn.commit()
             return cursor.rowcount
-        finally:
-            conn.close()
 
     def purge_stale_jobs(self, max_age_days: int = 14) -> int:
         """Remove old aggregator listings already stored in SQLite.
@@ -254,8 +250,7 @@ class SQLiteJobRepository:
             "zip_recruiter",
         }
         cutoff = date.today() - timedelta(days=max(0, max_age_days))
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             rows = conn.execute("SELECT url, posting_date, source FROM jobs").fetchall()
             stale_urls = []
             for row in rows:
@@ -272,14 +267,11 @@ class SQLiteJobRepository:
                 )
             conn.commit()
             return len(stale_urls)
-        finally:
-            conn.close()
 
     def purge_red_flag_jobs(self) -> int:
         """Remove previously stored jobs that fail the current staffing-agency / tiny-company screen."""
         predicate = CompanyRedFlagPredicate()
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             rows = conn.execute("SELECT url, company, description FROM jobs").fetchall()
             bad_urls = [row["url"] for row in rows if not predicate.evaluate(dict(row))]
             if not bad_urls:
@@ -287,13 +279,10 @@ class SQLiteJobRepository:
             conn.executemany("DELETE FROM jobs WHERE url = ?", [(url,) for url in bad_urls])
             conn.commit()
             return len(bad_urls)
-        finally:
-            conn.close()
 
     def purge_nonlocal_jobs(self) -> int:
         """Remove stored postings outside Greater Montreal or generic remote listings."""
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             rows = conn.execute("SELECT url, location FROM jobs").fetchall()
             bad_urls = [
                 row["url"] for row in rows if not is_montreal_area_or_remote(row["location"] or "")
@@ -303,8 +292,6 @@ class SQLiteJobRepository:
             conn.executemany("DELETE FROM jobs WHERE url = ?", [(url,) for url in bad_urls])
             conn.commit()
             return len(bad_urls)
-        finally:
-            conn.close()
 
     def reset_jobs(self) -> int:
         """Wipe every row from the `jobs` table (found/scored postings) while
@@ -316,26 +303,22 @@ class SQLiteJobRepository:
         applied/dismissed postings will still be correctly hidden by
         find_recent()/find_top() the moment they reappear.
         """
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             cursor = conn.execute("DELETE FROM jobs")
             # Reset the autoincrement counter too, if present, so new ids start
             # from 1 again instead of continuing from wherever they left off.
             conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
             conn.commit()
             return cursor.rowcount
-        finally:
-            conn.close()
 
     def dismiss(self, job: JobListing | dict[str, Any]) -> int:
         """Persist a posting rejection so it is never shown or saved again."""
-        job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
+        job_dict = as_job_dict(job)
         url = str(job_dict.get("url") or "").strip()
         if not url:
             raise ValueError("A job URL is required to dismiss a posting")
 
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 """
                 INSERT OR REPLACE INTO dismissed_jobs (url, title, company)
@@ -346,12 +329,9 @@ class SQLiteJobRepository:
             conn.execute("DELETE FROM jobs WHERE LOWER(TRIM(url)) = LOWER(TRIM(?))", (url,))
             conn.commit()
             return int(cursor.rowcount)
-        finally:
-            conn.close()
 
     def find_recent(self, limit: int = 15) -> list[sqlite3.Row]:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             return conn.execute(
                 f"""
                 SELECT jobs.* FROM jobs
@@ -361,12 +341,9 @@ class SQLiteJobRepository:
                 """,
                 (limit,),
             ).fetchall()
-        finally:
-            conn.close()
 
     def find_top(self, limit: int = 25) -> list[sqlite3.Row]:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             return conn.execute(
                 f"""
                 SELECT jobs.* FROM jobs
@@ -377,12 +354,9 @@ class SQLiteJobRepository:
                 """,
                 (limit,),
             ).fetchall()
-        finally:
-            conn.close()
 
     def get_stats(self) -> dict[str, Any]:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             row = conn.execute(
                 f"""
                 SELECT
@@ -396,8 +370,6 @@ class SQLiteJobRepository:
                 """
             ).fetchone()
             return dict(row) if row else {}
-        finally:
-            conn.close()
 
 
 class SQLiteApplicationRepository:
@@ -406,15 +378,8 @@ class SQLiteApplicationRepository:
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = Path(db_path)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        try:
-            return get_connection(self.db_path)
-        except TypeError:
-            return get_connection()
-
     def ensure_schema(self) -> None:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS applications (
@@ -447,8 +412,6 @@ class SQLiteApplicationRepository:
                 """
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def save(self, application: ApplicationRecord | dict[str, Any]) -> int:
         if isinstance(application, ApplicationRecord):
@@ -456,8 +419,7 @@ class SQLiteApplicationRepository:
         else:
             app_dict = dict(application)
 
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO applications (company, role, salary, fit_score, application_date, status, interview_date, notes, url, source, language, response_date, updated_at)
@@ -480,8 +442,6 @@ class SQLiteApplicationRepository:
             )
             conn.commit()
             return int(cursor.lastrowid)
-        finally:
-            conn.close()
 
     def update_status(
         self,
@@ -496,8 +456,7 @@ class SQLiteApplicationRepository:
         status = (status or "").strip().lower()
         if status not in ALL_STATUSES:
             raise ValueError(f"Unknown status {status!r}; expected one of {ALL_STATUSES}")
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             current = conn.execute(
                 "SELECT response_date, interview_date, notes FROM applications WHERE id = ?",
                 (application_id,),
@@ -520,13 +479,10 @@ class SQLiteApplicationRepository:
             )
             conn.commit()
             return True
-        finally:
-            conn.close()
 
     def funnel_rows(self) -> list[dict[str, Any]]:
         """One row per acted-on application, joined with the posting's source/score."""
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             rows = conn.execute(
                 f"""
                 SELECT a.id, a.company, a.role, a.status, a.fit_score AS app_fit_score,
@@ -539,34 +495,26 @@ class SQLiteApplicationRepository:
                 """
             ).fetchall()
             return [dict(row) for row in rows]
-        finally:
-            conn.close()
 
     def seen_identities(self) -> set[tuple[str, str]]:
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             rows = conn.execute(
                 f"""SELECT company, role AS title FROM applications
                     WHERE LOWER(COALESCE(status, '')) IN ({_APPLIED_SQL})
                     UNION
                     SELECT company, title FROM dismissed_jobs"""
             ).fetchall()
-        finally:
-            conn.close()
         return {identity(r["company"], r["title"]) for r in rows if r["company"] and r["title"]}
 
     def feedback_examples(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """(liked, disliked) rows for preference learning: applied vs dismissed postings."""
-        conn = self._get_connection()
-        try:
+        with _open_connection(self.db_path) as conn:
             liked = conn.execute(
                 f"""SELECT role AS title, company FROM applications
                     WHERE LOWER(COALESCE(status, '')) IN ({_APPLIED_SQL})"""
             ).fetchall()
             disliked = conn.execute("SELECT title, company FROM dismissed_jobs").fetchall()
             return [dict(row) for row in liked], [dict(row) for row in disliked]
-        finally:
-            conn.close()
 
 
 # Default singleton repository instances for convenience
@@ -691,25 +639,19 @@ def get_feedback_examples() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]
 
 
 def get_applied_urls() -> set[str]:
-    conn = get_connection()
-    try:
+    with _open_connection(None) as conn:
         rows = conn.execute(
             f"""SELECT DISTINCT url FROM applications
                 WHERE url IS NOT NULL AND TRIM(url) != ''
                   AND LOWER(COALESCE(status, '')) IN ({_APPLIED_SQL})"""
         ).fetchall()
-        return {str(row["url"]).strip().lower() for row in rows if str(row["url"]).strip()}
-    finally:
-        conn.close()
+    return {str(row["url"]).strip().lower() for row in rows if str(row["url"]).strip()}
 
 
 def get_dismissed_urls() -> set[str]:
-    conn = get_connection()
-    try:
+    with _open_connection(None) as conn:
         rows = conn.execute("SELECT url FROM dismissed_jobs").fetchall()
-        return {str(row["url"]).strip().lower() for row in rows if str(row["url"]).strip()}
-    finally:
-        conn.close()
+    return {str(row["url"]).strip().lower() for row in rows if str(row["url"]).strip()}
 
 
 def get_seen_identities() -> set[tuple[str, str]]:
@@ -726,7 +668,7 @@ def filter_applied_jobs(jobs: Iterable[dict[str, Any] | JobListing]) -> list[dic
     excluded_identities = get_seen_identities()
     filtered: list[dict[str, Any]] = []
     for job in jobs:
-        job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
+        job_dict = as_job_dict(job)
         url = str(job_dict.get("url") or "").strip().lower()
         if url and url in excluded_urls:
             continue

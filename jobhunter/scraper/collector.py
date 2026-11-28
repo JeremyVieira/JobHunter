@@ -33,7 +33,7 @@ from jobhunter.config.settings import (
     JOBSPY_SITES,
     LEVER_BOARDS,
 )
-from jobhunter.textutils import days_since
+from jobhunter.textutils import bs4_text, days_since
 
 from .http import DEFAULT_HEADERS, _request_get, _request_post
 from .normalize import MAX_DESCRIPTION_CHARS, canonical_job_url, normalize_job
@@ -278,9 +278,7 @@ class CompanyCareerPageScraper(BaseScraper):
             )
             if value
         ) or ("Remote" if item.get("jobLocationType") == "TELECOMMUTE" else "Unknown")
-        description = BeautifulSoup(str(item.get("description") or ""), "html.parser").get_text(
-            " ", strip=True
-        )
+        description = bs4_text(item.get("description"))
         return normalize_job(
             {
                 "title": item.get("title"),
@@ -298,142 +296,121 @@ class CompanyCareerPageScraper(BaseScraper):
         )
 
 
-class JobicyScraper(BaseScraper):
+class JsonApiScraper(BaseScraper):
+    """Template for job boards exposing a JSON list of job records.
+
+    Subclasses declare the payload's list key and the item keys per field;
+    ``scrape`` owns the request, the required-field validation, and the
+    normalization loop.
+    """
+
+    source_name: str = ""
+    list_key: str = "jobs"
+    title_key: str = "title"
+    company_key: str = "company_name"
+    url_key: str = "url"
+    description_keys: tuple[str, ...] = ("description",)
+    location_key: str | None = None
+    default_location: str = "Remote"
+    posting_date_key: str = "publication_date"
+
+    def __init__(self, api_url: str, timeout: int = 20):
+        self.api_url = api_url
+        self.timeout = timeout
+
+    def scrape(self) -> list[dict[str, Any]]:
+        try:
+            response = _request_get(self.api_url, timeout=self.timeout)
+            payload = response.json()
+        except Exception:
+            LOGGER.exception("%s source request failed.", self.source_name.capitalize())
+            return []
+
+        jobs: list[dict[str, Any]] = []
+        for item in payload.get(self.list_key, []):
+            title = (item.get(self.title_key) or "").strip()
+            company = (item.get(self.company_key) or "").strip()
+            url = (item.get(self.url_key) or "").strip()
+            if not title or not company or not url:
+                continue
+            jobs.append(normalize_job(self._to_job(item, title, company, url)))
+        return jobs
+
+    def _to_job(self, item: dict, title: str, company: str, url: str) -> dict[str, Any]:
+        raw_desc = next((item.get(k) for k in self.description_keys if item.get(k)), "")
+        return {
+            "title": title,
+            "company": company,
+            "location": self._location(item),
+            "remote_status": self._remote_status(item),
+            "salary": self._salary(item),
+            "description": bs4_text(raw_desc),
+            "posting_date": str(item.get(self.posting_date_key, "Unknown"))[:10],
+            "url": url,
+            "source": self.source_name,
+        }
+
+    def _location(self, item: dict) -> str:
+        if self.location_key:
+            return item.get(self.location_key) or self.default_location
+        return self.default_location
+
+    def _remote_status(self, item: dict) -> str:
+        return "Remote"
+
+    def _salary(self, item: dict) -> str:
+        return item.get("salary") or "Not disclosed"
+
+
+class JobicyScraper(JsonApiScraper):
     """Scraper adapter for Jobicy public remote jobs API."""
 
+    source_name = "jobicy"
+    title_key = "jobTitle"
+    company_key = "companyName"
+    description_keys = ("jobDescription", "jobExcerpt")
+    location_key = "jobGeo"
+    posting_date_key = "pubDate"
+
     def __init__(self, api_url: str = JOBICY_API_URL, timeout: int = 20):
-        self.api_url = api_url
-        self.timeout = timeout
+        super().__init__(api_url, timeout)
 
-    def scrape(self) -> list[dict[str, Any]]:
-        response = _request_get(self.api_url, timeout=self.timeout)
-        payload = response.json()
-        jobs: list[dict[str, Any]] = []
-
-        for item in payload.get("jobs", []):
-            title = (item.get("jobTitle") or "").strip()
-            company = (item.get("companyName") or "").strip()
-            url = (item.get("url") or "").strip()
-            if not title or not company or not url:
-                continue
-
-            description = BeautifulSoup(
-                item.get("jobDescription") or item.get("jobExcerpt") or "", "html.parser"
-            ).get_text(" ", strip=True)
-            salary_minimum = item.get("salaryMin")
-            salary = (
-                f"{item.get('salaryCurrency', '$')}{salary_minimum}"
-                if salary_minimum
-                else "Not disclosed"
-            )
-            jobs.append(
-                normalize_job(
-                    {
-                        "title": title,
-                        "company": company,
-                        "location": item.get("jobGeo") or "Remote",
-                        "remote_status": "Remote",
-                        "salary": salary,
-                        "description": description,
-                        "posting_date": item.get("pubDate") or "Unknown",
-                        "url": url,
-                        "source": "jobicy",
-                    }
-                )
-            )
-        return jobs
+    def _salary(self, item: dict) -> str:
+        salary_minimum = item.get("salaryMin")
+        if not salary_minimum:
+            return "Not disclosed"
+        return f"{item.get('salaryCurrency', '$')}{salary_minimum}"
 
 
-class RemotiveScraper(BaseScraper):
+class RemotiveScraper(JsonApiScraper):
     """Scraper adapter for Remotive public API."""
 
+    source_name = "remotive"
+    location_key = "candidate_required_location"
+
     def __init__(self, api_url: str = REMOTIVE_API_URL, timeout: int = 20):
-        self.api_url = api_url
-        self.timeout = timeout
-
-    def scrape(self) -> list[dict[str, Any]]:
-        try:
-            response = _request_get(self.api_url, timeout=self.timeout)
-            payload = response.json()
-        except Exception:
-            LOGGER.exception("Remotive source request failed.")
-            return []
-
-        jobs: list[dict[str, Any]] = []
-        for item in payload.get("jobs", []):
-            title = (item.get("title") or "").strip()
-            company = (item.get("company_name") or "").strip()
-            url = (item.get("url") or "").strip()
-            if not title or not company or not url:
-                continue
-
-            raw_desc = item.get("description") or ""
-            description = BeautifulSoup(raw_desc, "html.parser").get_text(" ", strip=True)
-            salary = item.get("salary") or "Not disclosed"
-            candidate_loc = item.get("candidate_required_location") or "Remote"
-
-            jobs.append(
-                normalize_job(
-                    {
-                        "title": title,
-                        "company": company,
-                        "location": candidate_loc,
-                        "remote_status": "Remote",
-                        "salary": salary,
-                        "description": description,
-                        "posting_date": str(item.get("publication_date", "Unknown"))[:10],
-                        "url": url,
-                        "source": "remotive",
-                    }
-                )
-            )
-        return jobs
+        super().__init__(api_url, timeout)
 
 
-class ArbeitnowScraper(BaseScraper):
+class ArbeitnowScraper(JsonApiScraper):
     """Scraper adapter for Arbeitnow public API."""
 
+    source_name = "arbeitnow"
+    list_key = "data"
+    location_key = "location"
+    posting_date_key = "created_at"
+
     def __init__(self, api_url: str = ARBEITNOW_API_URL, timeout: int = 20):
-        self.api_url = api_url
-        self.timeout = timeout
+        super().__init__(api_url, timeout)
 
-    def scrape(self) -> list[dict[str, Any]]:
-        try:
-            response = _request_get(self.api_url, timeout=self.timeout)
-            payload = response.json()
-        except Exception:
-            LOGGER.exception("Arbeitnow source request failed.")
-            return []
+    def _location(self, item: dict) -> str:
+        return (item.get(self.location_key) or ("Remote" if item.get("remote") else "Montreal, QC")).strip()
 
-        jobs: list[dict[str, Any]] = []
-        for item in payload.get("data", []):
-            title = (item.get("title") or "").strip()
-            company = (item.get("company_name") or "").strip()
-            url = (item.get("url") or "").strip()
-            if not title or not company or not url:
-                continue
+    def _remote_status(self, item: dict) -> str:
+        return "Remote" if item.get("remote") else "Hybrid/On-site"
 
-            raw_desc = item.get("description") or ""
-            description = BeautifulSoup(raw_desc, "html.parser").get_text(" ", strip=True)
-            is_remote = bool(item.get("remote"))
-            location = (item.get("location") or ("Remote" if is_remote else "Montreal, QC")).strip()
-
-            jobs.append(
-                normalize_job(
-                    {
-                        "title": title,
-                        "company": company,
-                        "location": location,
-                        "remote_status": "Remote" if is_remote else "Hybrid/On-site",
-                        "salary": "Not disclosed",
-                        "description": description,
-                        "posting_date": str(item.get("created_at", "Unknown"))[:10],
-                        "url": url,
-                        "source": "arbeitnow",
-                    }
-                )
-            )
-        return jobs
+    def _salary(self, item: dict) -> str:
+        return "Not disclosed"
 
 
 class JobSpyScraper(BaseScraper):
@@ -582,9 +559,7 @@ class GreenhouseScraper(BaseScraper):
                     continue
 
                 location = ((item.get("location") or {}).get("name") or "Unknown").strip()
-                description = BeautifulSoup(item.get("content") or "", "html.parser").get_text(
-                    " ", strip=True
-                )
+                description = bs4_text(item.get("content"))
                 is_remote = "remote" in location.lower()
 
                 jobs.append(
@@ -641,10 +616,7 @@ class LeverScraper(BaseScraper):
                 location = (categories.get("location") or "Unknown").strip()
                 workplace_type = (categories.get("workplaceType") or "").lower()
                 is_remote = workplace_type == "remote" or "remote" in location.lower()
-                description = BeautifulSoup(
-                    item.get("descriptionPlain") or item.get("description") or "",
-                    "html.parser",
-                ).get_text(" ", strip=True)
+                description = bs4_text(item.get("descriptionPlain") or item.get("description") or "")
 
                 jobs.append(
                     normalize_job(
