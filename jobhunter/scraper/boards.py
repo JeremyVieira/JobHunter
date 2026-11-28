@@ -26,16 +26,13 @@ from jobhunter.scraper.collector import (
     _request_post,
     normalize_job,
 )
+from jobhunter.textutils import bs4_text as _text
 
 LOGGER = logging.getLogger(__name__)
 
 MUSE_API = "https://www.themuse.com/api/public/jobs"
 ADZUNA_API = "https://api.adzuna.com/v1/api/jobs/ca/search/{page}"
 JOOBLE_API = "https://jooble.org/api/{key}"
-
-
-def _text(html: Any) -> str:
-    return BeautifulSoup(str(html or ""), "html.parser").get_text(" ", strip=True)
 
 
 def _terms(search_terms: list[str] | None) -> list[str]:

@@ -1,24 +1,29 @@
+"""Job scrapers and the collection pipeline.
+
+HTTP plumbing lives in :mod:`jobhunter.scraper.http`, quality filters in
+:mod:`jobhunter.scraper.quality`, and normalization helpers in
+:mod:`jobhunter.scraper.normalize`; the names imported below are re-exported
+(via ``__all__``) so existing ``from jobhunter.scraper.collector import ...``
+callers keep working unchanged.
+"""
+
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from jobspy import scrape_jobs
 
 from jobhunter.config import settings as _settings
-from jobhunter.config.defaults import (
-    COLLECTION_ESTABLISHED_COMPANIES,
-    DEFAULT_SEARCH_TERMS,
-    MANAGEMENT_TITLE_TERMS,
-    TINY_STARTUP_SIGNAL_TERMS,
-)
+from jobhunter.config.defaults import DEFAULT_SEARCH_TERMS
 from jobhunter.config.settings import (
     COMPANY_CAREER_URLS,
     GREENHOUSE_BOARDS,
@@ -28,13 +33,38 @@ from jobhunter.config.settings import (
     JOBSPY_SITES,
     LEVER_BOARDS,
 )
-from jobhunter.textutils import (
-    contains_any_term,
-    days_since,
-    html_to_text,
-    normalize_salary,
-    normalize_text,
+from jobhunter.textutils import days_since
+
+from .http import DEFAULT_HEADERS, _request_get, _request_post
+from .normalize import MAX_DESCRIPTION_CHARS, canonical_job_url, normalize_job
+from .normalize import jobspy_text as _jobspy_text
+from .quality import (
+    MIN_DESCRIPTION_LENGTH,
+    SHADY_COMPANY_NAME_TERMS,
+    SHADY_DESCRIPTION_TERMS,
+    _normalize_for_filter,
+    filter_relevant_jobs,
+    is_excluded_title,
+    is_likely_tiny_startup,
+    is_shady_posting,
 )
+
+__all__ = [
+    "DEFAULT_HEADERS",
+    "MAX_DESCRIPTION_CHARS",
+    "MIN_DESCRIPTION_LENGTH",
+    "SHADY_COMPANY_NAME_TERMS",
+    "SHADY_DESCRIPTION_TERMS",
+    "_normalize_for_filter",
+    "_request_get",
+    "_request_post",
+    "canonical_job_url",
+    "filter_relevant_jobs",
+    "is_excluded_title",
+    "is_likely_tiny_startup",
+    "is_shady_posting",
+    "normalize_job",
+]
 
 
 def _setting(name: str, default: Any) -> Any:
@@ -44,113 +74,8 @@ def _setting(name: str, default: Any) -> Any:
 JOBICY_API_URL = "https://jobicy.com/api/v2/remote-jobs?count=50"
 REMOTIVE_API_URL = "https://remotive.com/api/remote-jobs?limit=50"
 ARBEITNOW_API_URL = "https://www.arbeitnow.com/api/job-board-api"
-# Company-name fragments that signal the poster is hiding who they are, which
-# correlates strongly with low-quality or scammy postings (fake "confidential"
-# listings, resume-harvesting, recruiting-agency spam with no real employer named).
-SHADY_COMPANY_NAME_TERMS = (
-    "confidential",
-    "undisclosed",
-    "anonymous",
-    "stealth",
-    "various clients",
-    "a client of",
-    "our client",
-)
 
-# Description-level red flags for scams / pyramid-scheme-adjacent postings and
-# postings that aren't real jobs (unpaid, pay-to-apply, "guaranteed income" spam).
-SHADY_DESCRIPTION_TERMS = (
-    "unpaid position",
-    "no salary",
-    "equity only",
-    "must pay",
-    "training fee",
-    "pay to apply",
-    "registration fee",
-    "guaranteed income",
-    "be your own boss",
-    "unlimited earning potential",
-    "wire transfer",
-    "processing fee",
-    "send your bank details",
-)
-
-# A real posting almost always runs longer than this; a description this thin is
-# usually a stub/spam listing rather than an actual job ad worth reading.
-MIN_DESCRIPTION_LENGTH = 80
-# Long enough to keep requirement sections that sit at the bottom of a posting.
-MAX_DESCRIPTION_CHARS = 12000
 LOGGER = logging.getLogger(__name__)
-MAX_GET_ATTEMPTS = 3
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-
-# Some sites (e.g. The Muse) reject the default python-requests User-Agent with a
-# 403, so every request goes out with a browser-like identity unless overridden.
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-
-
-def _with_default_headers(kwargs: dict) -> dict:
-    headers = dict(DEFAULT_HEADERS)
-    headers.update(kwargs.pop("headers", {}) or {})
-    kwargs["headers"] = headers
-    return kwargs
-
-
-def _request_with_retries(method: str, url: str, *, timeout: int = 20, **kwargs):
-    """GET/POST with the same retry/backoff policy; honours ``Retry-After``."""
-    kwargs = _with_default_headers(kwargs)
-    request = requests.get if method == "get" else requests.post
-    for attempt in range(1, MAX_GET_ATTEMPTS + 1):
-        try:
-            response = request(url, timeout=timeout, **kwargs)
-        except (requests.ConnectionError, requests.Timeout):
-            if attempt == MAX_GET_ATTEMPTS:
-                raise
-            LOGGER.warning(
-                "%s request failed on attempt %s/%s: %s",
-                method.upper(),
-                attempt,
-                MAX_GET_ATTEMPTS,
-                url,
-                exc_info=True,
-            )
-            time.sleep(0.25 * 2 ** (attempt - 1))
-            continue
-        status_code = getattr(response, "status_code", 200)
-        if status_code in RETRYABLE_STATUS_CODES and attempt < MAX_GET_ATTEMPTS:
-            retry_after = getattr(response, "headers", {}).get("Retry-After", "")
-            try:
-                delay = min(float(retry_after), 30.0)
-            except (TypeError, ValueError):
-                delay = 0.25 * 2 ** (attempt - 1)
-            LOGGER.warning(
-                "%s request received HTTP %s on attempt %s/%s: %s",
-                method.upper(),
-                status_code,
-                attempt,
-                MAX_GET_ATTEMPTS,
-                url,
-            )
-            time.sleep(delay)
-            continue
-        response.raise_for_status()
-        return response
-    raise RuntimeError(
-        f"{method.upper()} request failed after {MAX_GET_ATTEMPTS} attempts: {url}"
-    )
-
-
-def _request_get(url: str, *, timeout: int = 20, **kwargs):
-    return _request_with_retries("get", url, timeout=timeout, **kwargs)
-
-
-def _request_post(url: str, *, timeout: int = 20, **kwargs):
-    return _request_with_retries("post", url, timeout=timeout, **kwargs)
-
 
 REQUEST_DELAY_SECONDS = float(_setting("REQUEST_DELAY_SECONDS", 0.3))
 
@@ -159,78 +84,6 @@ def _polite_sleep() -> None:
     """Small pause between requests to the same provider (tests set the delay to 0)."""
     if REQUEST_DELAY_SECONDS > 0:
         time.sleep(REQUEST_DELAY_SECONDS)
-
-
-# Companies large/stable enough that startup-culture language in their own JD (e.g.
-# "fast-paced") shouldn't count against them. Kept loosely in sync with
-
-
-def _normalize_for_filter(value: str) -> str:
-    return normalize_text(value or "")
-
-
-def is_excluded_title(title: str) -> bool:
-    """True if a title is a structural mismatch (management/executive) regardless
-    of how well the rest of the posting reads. Whole-word match; entry-level
-    "Associate Product Manager" programs are the one exception."""
-    text = _normalize_for_filter(title)
-    if contains_any_term(text, ("associate product manager", "apm")):
-        return False
-    return contains_any_term(text, MANAGEMENT_TITLE_TERMS)
-
-
-def is_shady_posting(job: dict[str, Any]) -> bool:
-    """True for postings that look like spam, scams, or resume-harvesting rather
-    than a real job: an unnamed employer, pay-to-apply / unpaid-position language,
-    or a description too thin to be a genuine ad."""
-    company = _normalize_for_filter(job.get("company", ""))
-    description = _normalize_for_filter(job.get("description", ""))
-
-    if contains_any_term(company, SHADY_COMPANY_NAME_TERMS):
-        return True
-    if contains_any_term(description, SHADY_DESCRIPTION_TERMS):
-        return True
-    if description and len(description) < MIN_DESCRIPTION_LENGTH:
-        return True
-    return False
-
-
-def is_likely_tiny_startup(job: dict[str, Any]) -> bool:
-    """Best-effort proxy for 'tiny/very early-stage company'. Free scraping APIs
-    don't expose employee counts or funding data, so this only catches companies
-    whose own name or job description self-identifies as small/early-stage. It
-    will under-flag (a real tiny startup that doesn't say so in the JD slips
-    through) but should rarely over-flag a genuinely established employer."""
-    company = _normalize_for_filter(job.get("company", ""))
-    if contains_any_term(company, COLLECTION_ESTABLISHED_COMPANIES):
-        return False
-    if contains_any_term(company, ("labs", "forge", "ventures", "startup")):
-        return True
-    description = _normalize_for_filter(job.get("description", ""))
-    if contains_any_term(description, TINY_STARTUP_SIGNAL_TERMS):
-        return True
-    return False
-
-
-def filter_relevant_jobs(
-    jobs: Iterable[dict[str, Any]],
-    exclude_tiny_startups: bool = True,
-) -> list[dict[str, Any]]:
-    """Drop management/executive titles, shady/spammy postings, and (optionally)
-    self-described tiny/early-stage startups from a combined jobs list.
-
-    Call this once, after merging results from all scrapers and before handing the
-    list to scoring.score_jobs() (which also filters management titles by default)
-    or to save_jobs_to_json(), so mismatched/low-quality postings don't clutter
-    storage either. Set exclude_tiny_startups=False if you'd rather see small
-    companies ranked normally instead of removed — the signal is best-effort, so
-    over-filtering is possible.
-    """
-    filtered = [job for job in jobs if not is_excluded_title(job.get("title", ""))]
-    filtered = [job for job in filtered if not is_shady_posting(job)]
-    if exclude_tiny_startups:
-        filtered = [job for job in filtered if not is_likely_tiny_startup(job)]
-    return filtered
 
 
 class BaseScraper(ABC):
@@ -867,17 +720,11 @@ def fetch_lever_jobs(
     return LeverScraper(companies=companies, timeout=timeout).scrape()
 
 
-def _jobspy_text(value, default: str = "") -> str:
-    if value is None or str(value).lower() == "nan":
-        return default
-    return str(value).strip() or default
-
-
 def _suppress_jobspy_loggers() -> None:
     """Mute noisy error logs from third-party scrapers that hit anti-bot defenses."""
     for module_name in ["jobspy.glassdoor", "jobspy.ziprecruiter"]:
         try:
-            mod = __import__(module_name, fromlist=["log"])
+            mod = importlib.import_module(module_name)
             if hasattr(mod, "log"):
                 mod.log.disabled = True
         except Exception:
@@ -960,40 +807,6 @@ def parse_indeed_html(html: str) -> list[dict]:
 def parse_generic_html(html: str, source: str) -> list[dict]:
     """Ignore pages that cannot be parsed into individual job listings."""
     return []
-
-
-def normalize_job(job: dict) -> dict:
-    normalized = {
-        "title": (job.get("title") or "Unknown role").strip(),
-        "company": (job.get("company") or "Unknown").strip(),
-        # A missing location is "Unknown" (never silently Montreal or Remote): the
-        # location filter decides what to do with it.
-        "location": (job.get("location") or "Unknown").strip(),
-        "remote_status": (job.get("remote_status") or "Hybrid/Remote").strip(),
-        "salary": normalize_salary(str(job.get("salary") or "")),
-        "description": html_to_text(str(job.get("description") or ""))[:MAX_DESCRIPTION_CHARS],
-        "posting_date": (job.get("posting_date") or "Unknown").strip(),
-        "url": (job.get("url") or "").strip(),
-        "source": (job.get("source") or "manual").strip(),
-    }
-    return normalized
-
-
-def canonical_job_url(url: str) -> str:
-    parsed = urlsplit((url or "").strip())
-    hostname = parsed.netloc.lower()
-    if hostname.startswith("www."):
-        hostname = hostname[4:]
-    ignored_parameters = {"fbclid", "gclid", "msclkid", "ref", "referrer"}
-    query = urlencode(
-        sorted(
-            (key, value)
-            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-            if not key.lower().startswith("utm_") and key.lower() not in ignored_parameters
-        )
-    )
-    path = parsed.path.rstrip("/") or "/"
-    return urlunsplit((parsed.scheme.lower(), hostname, path, query, ""))
 
 
 AGGREGATOR_SOURCES = frozenset(

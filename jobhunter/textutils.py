@@ -12,6 +12,7 @@ import re
 import unicodedata
 from datetime import date, datetime, timedelta
 from functools import lru_cache
+from typing import Any
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -57,6 +58,13 @@ def html_to_text(value: str) -> str:
     plain = _TAG_RE.sub(" ", value or "")
     plain = _MARKDOWN_RE.sub(" ", plain)
     return _SPACE_RE.sub(" ", plain).strip()
+
+
+def bs4_text(html: Any) -> str:
+    """Parse HTML/XML fragments with BeautifulSoup and return their plain text."""
+    from bs4 import BeautifulSoup
+
+    return BeautifulSoup(str(html or ""), "html.parser").get_text(" ", strip=True)
 
 
 _SALARY_NUMBER_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*([kmb])?", re.I)

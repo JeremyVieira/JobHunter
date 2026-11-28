@@ -45,6 +45,7 @@ Above 88 points the excess is compressed (35%), so several excellent postings do
 
 ## Tuning
 
-Change weights in `jobhunter/config/settings.py` (`SCORING_RULES_DATA`) and hard filters in
+Change weights in `jobhunter/config/defaults.py` (`DEFAULT_SCORING_RULES`, surfaced as
+`SCORING_RULES` in `jobhunter/config/settings.py`) and hard filters in
 `jobhunter/filter.py`. `python -m jobhunter demo` is a quick way to see the effect on a stable set
 of synthetic postings.

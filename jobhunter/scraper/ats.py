@@ -17,8 +17,6 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
-
 from jobhunter.config import registry
 from jobhunter.filter import (
     MONTREAL_AREA_TERMS,
@@ -36,6 +34,7 @@ from jobhunter.scraper.collector import (
     is_excluded_title,
     normalize_job,
 )
+from jobhunter.textutils import bs4_text as _text
 from jobhunter.textutils import contains_any_term, normalize_text, parse_posting_date
 
 LOGGER = logging.getLogger(__name__)
@@ -58,10 +57,6 @@ DEFAULT_WORKDAY_TERMS = (
     "python",
     "automation",
 )
-
-
-def _text(html: Any) -> str:
-    return BeautifulSoup(str(html or ""), "html.parser").get_text(" ", strip=True)
 
 
 def _best_location(primary: str, *others: str) -> str:

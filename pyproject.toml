@@ -29,6 +29,7 @@ namespaces = true
 [tool.setuptools.package-data]
 jobhunter = [
     "demo_data/*.txt",
+    "matching/*.json",
     # templates only - never the private master_resume*.txt / summary_variants.json
     "resume/*.template.txt",
     "resume/*.template.json",

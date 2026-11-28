@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import Iterable
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from jobhunter.config.settings import DB_PATH
 from jobhunter.filter import CompanyRedFlagPredicate, is_montreal_area_or_remote
@@ -28,6 +28,19 @@ RESPONDED_STATUSES = ("screening", "interview", "offer", "rejected")
 INTERVIEW_STATUSES = ("interview", "offer")
 ALL_STATUSES = ("saved", *APPLIED_STATUSES)
 _APPLIED_SQL = ", ".join(f"'{status}'" for status in APPLIED_STATUSES)
+
+# Rows shown in "new opportunities" lists: not acted on (applications) and not dismissed.
+_HIDDEN_SQL = f"""
+    NOT EXISTS (
+        SELECT 1 FROM applications
+        WHERE LOWER(TRIM(applications.url)) = LOWER(TRIM(jobs.url))
+          AND LOWER(COALESCE(applications.status, '')) IN ({_APPLIED_SQL})
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM dismissed_jobs
+        WHERE LOWER(TRIM(dismissed_jobs.url)) = LOWER(TRIM(jobs.url))
+    )
+"""
 
 
 def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
@@ -57,25 +70,6 @@ def parse_match_details(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return decoded if isinstance(decoded, dict) else {}
-
-
-class IJobRepository(Protocol):
-    def ensure_schema(self) -> None: ...
-    def save(self, job: JobListing | dict[str, Any]) -> int: ...
-    def save_many(self, jobs: Iterable[JobListing | dict[str, Any]]) -> int: ...
-    def purge_placeholders(self) -> int: ...
-    def purge_red_flag_jobs(self) -> int: ...
-    def purge_stale_jobs(self, max_age_days: int = 14) -> int: ...
-    def reset_jobs(self) -> int: ...
-    def dismiss(self, job: JobListing | dict[str, Any]) -> int: ...
-    def find_recent(self, limit: int = 15) -> list[sqlite3.Row]: ...
-    def find_top(self, limit: int = 25) -> list[sqlite3.Row]: ...
-    def get_stats(self) -> dict[str, Any]: ...
-
-
-class IApplicationRepository(Protocol):
-    def ensure_schema(self) -> None: ...
-    def save(self, application: ApplicationRecord | dict[str, Any]) -> int: ...
 
 
 class SQLiteJobRepository:
@@ -359,17 +353,9 @@ class SQLiteJobRepository:
         conn = self._get_connection()
         try:
             return conn.execute(
-                """
+                f"""
                 SELECT jobs.* FROM jobs
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM applications
-                    WHERE LOWER(TRIM(applications.url)) = LOWER(TRIM(jobs.url))
-                      AND LOWER(COALESCE(applications.status, '')) IN ('applied', 'screening', 'interview', 'offer', 'rejected', 'ghosted', 'withdrawn')
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM dismissed_jobs
-                    WHERE LOWER(TRIM(dismissed_jobs.url)) = LOWER(TRIM(jobs.url))
-                )
+                WHERE {_HIDDEN_SQL}
                 ORDER BY fit_score DESC, created_at DESC
                 LIMIT ?
                 """,
@@ -382,18 +368,10 @@ class SQLiteJobRepository:
         conn = self._get_connection()
         try:
             return conn.execute(
-                """
-                                SELECT jobs.* FROM jobs
-                                WHERE jobs.fit_score IS NOT NULL
-                                    AND NOT EXISTS (
-                                            SELECT 1 FROM applications
-                                            WHERE LOWER(TRIM(applications.url)) = LOWER(TRIM(jobs.url))
-                                                AND LOWER(COALESCE(applications.status, '')) IN ('applied', 'screening', 'interview', 'offer', 'rejected', 'ghosted', 'withdrawn')
-                                    )
-                                      AND NOT EXISTS (
-                                          SELECT 1 FROM dismissed_jobs
-                                          WHERE LOWER(TRIM(dismissed_jobs.url)) = LOWER(TRIM(jobs.url))
-                                      )
+                f"""
+                SELECT jobs.* FROM jobs
+                WHERE jobs.fit_score IS NOT NULL
+                AND {_HIDDEN_SQL}
                 ORDER BY fit_score DESC, salary DESC
                 LIMIT ?
                 """,
@@ -406,7 +384,7 @@ class SQLiteJobRepository:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS total_jobs,
                     AVG(fit_score) AS avg_fit_score,
@@ -414,15 +392,7 @@ class SQLiteJobRepository:
                     AVG(salary_potential) AS avg_growth,
                     SUM(CASE WHEN fit_score >= 80 THEN 1 ELSE 0 END) AS high_fit_jobs
                 FROM jobs
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM applications
-                    WHERE LOWER(TRIM(applications.url)) = LOWER(TRIM(jobs.url))
-                      AND LOWER(COALESCE(applications.status, '')) IN ('applied', 'screening', 'interview', 'offer', 'rejected', 'ghosted', 'withdrawn')
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM dismissed_jobs
-                    WHERE LOWER(TRIM(dismissed_jobs.url)) = LOWER(TRIM(jobs.url))
-                )
+                WHERE {_HIDDEN_SQL}
                 """
             ).fetchone()
             return dict(row) if row else {}
@@ -724,9 +694,9 @@ def get_applied_urls() -> set[str]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            """SELECT DISTINCT url FROM applications
-                             WHERE url IS NOT NULL AND TRIM(url) != ''
-                                 AND LOWER(COALESCE(status, '')) IN ('applied', 'screening', 'interview', 'offer', 'rejected', 'ghosted', 'withdrawn')"""
+            f"""SELECT DISTINCT url FROM applications
+                WHERE url IS NOT NULL AND TRIM(url) != ''
+                  AND LOWER(COALESCE(status, '')) IN ({_APPLIED_SQL})"""
         ).fetchall()
         return {str(row["url"]).strip().lower() for row in rows if str(row["url"]).strip()}
     finally:

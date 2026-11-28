@@ -14,6 +14,12 @@
 
 ### Changed
 - The summary is rendered without a heading and left-aligned (justified text left uneven gaps).
+- Internal: `scraper/collector.py` was split into focused modules — request plumbing moved to `scraper/http.py`, posting-quality filters to `scraper/quality.py`, and job normalization/canonical URLs to `scraper/normalize.py`. The public `collector` API is unchanged (names are re-exported), so no caller or test changes were needed.
+- Internal: `scoring/engine.py` dropped the per-dimension strategy classes (`IScoringDimension` and friends); `CompositeScorer.score_job` now calls the dimension functions directly. All public entry points (`fit_score`, `score_jobs`, `*_match_score`, `CompositeScorer`) are unchanged and tests pass as-is.
+- Internal: `tracker/db.py` dropped the unused `IJobRepository`/`IApplicationRepository` Protocol classes and de-duplicated the "hide acted-on postings" SQL now shared as `_HIDDEN_SQL` by `find_recent`, `find_top`, and `get_stats`. Public module functions and repository classes are unchanged; tests pass as-is.
+- Internal: the 130-entry `SKILLS` taxonomy moved from `matching/skills.py` to `matching/skills_data.json` (loaded at import, also shipped as package data). `skills.py` shrank from 659 to ~200 lines; the public names (`SKILLS`, `SkillMatcher`, `get_matcher`, `expand_inventory`, `skill_text`, `label_for`) are unchanged and tests pass as-is.
+- Internal: the duplicate `_text()` HTML helpers in `scraper/ats.py` and `scraper/boards.py` now come from one shared `textutils.bs4_text()`; `_suppress_jobspy_loggers()` uses `importlib.import_module` instead of `__import__`.
+- Internal: runtime data now defaults to the repository root (`data/`, `logs/`, `outputs/`) instead of inside the `jobhunter/` package; the `JOBHUNTER_DATA_DIR`/`JOBHUNTER_LOG_DIR`/`JOBHUNTER_OUTPUT_DIR`/`JOBHUNTER_DB_PATH` env overrides are unchanged, so set them to point at an existing database if you upgrade in place.
 
 ## 2.0.0 - 2026-11-11
 

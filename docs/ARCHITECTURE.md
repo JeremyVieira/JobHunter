@@ -38,7 +38,10 @@ flowchart LR
 
 | Path | What lives there |
 | --- | --- |
-| `scraper/collector.py` | Base scraper, request helpers (retry/backoff, politeness delay), JobSpy, Greenhouse, Lever, career pages, remote boards. |
+| `scraper/collector.py` | Base scraper, JobSpy, Greenhouse, Lever, career pages, remote boards, HTML parsers, collection pipeline. Re-exports helpers from the modules below. |
+| `scraper/http.py` | Request plumbing: default headers, retry/backoff GET/POST helpers. |
+| `scraper/quality.py` | Posting-quality filters (excluded titles, shady postings, tiny-startup heuristics). |
+| `scraper/normalize.py` | Job normalization, canonical URLs, JobSpy field cleanup. |
 | `scraper/ats.py` | Ashby, Workable, SmartRecruiters, Recruitee, Workday adapters and `detect_ats`. |
 | `scraper/boards.py` | The Muse, Adzuna, Jooble, RSS/Atom. |
 | `scraper/dedupe.py`, `enrich.py`, `sources.py`, `discover.py` | Cross-board de-duplication, snippet enrichment, default scraper set, token discovery CLI. |
@@ -70,11 +73,11 @@ register it with `ScraperFactory.register("name", YourScraper)`, and add it to
 `build_default_scrapers()` in `scraper/sources.py`. Test it with a fake `_request_get` as in
 `tests/test_sources.py`.
 
-**Add a skill.** Add an entry to `SKILLS` in `matching/skills.py` (label, category, aliases).
+**Add a skill.** Add an entry to `matching/skills_data.json` (`id -> [label, category, aliases]`); `skills.py` loads it into `SKILLS` at import.
 Aliases are matched as whole words; avoid ambiguous English words ("spring", "express").
 
-**Add a scoring dimension.** Implement `IScoringDimension.evaluate`, add a weight to
-`ScoringRulesConfig`, and include it in `CompositeScorer.score_job`.
+**Add a scoring dimension.** Add a scoring function in `scoring/engine.py`, add a weight
+to `ScoringRulesConfig`, and include it in `CompositeScorer.score_job`.
 
 ## Testing
 

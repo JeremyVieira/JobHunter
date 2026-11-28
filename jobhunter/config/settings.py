@@ -25,9 +25,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(REPOSITORY_ROOT / ".env")
 
-DATA_DIR = env.path("JOBHUNTER_DATA_DIR", BASE_DIR / "data")
-LOG_DIR = env.path("JOBHUNTER_LOG_DIR", BASE_DIR / "logs")
-OUTPUT_DIR = env.path("JOBHUNTER_OUTPUT_DIR", BASE_DIR / "outputs")
+DATA_DIR = env.path("JOBHUNTER_DATA_DIR", REPOSITORY_ROOT / "data")
+LOG_DIR = env.path("JOBHUNTER_LOG_DIR", REPOSITORY_ROOT / "logs")
+OUTPUT_DIR = env.path("JOBHUNTER_OUTPUT_DIR", REPOSITORY_ROOT / "outputs")
 RESUME_DIR = OUTPUT_DIR / "resumes"
 DB_PATH = env.path("JOBHUNTER_DB_PATH", DATA_DIR / "jobhunter.db")
 RESUME_SOURCE_DIR = env.path("JOBHUNTER_RESUME_DIR", BASE_DIR / "resume")

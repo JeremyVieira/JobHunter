@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any
@@ -211,32 +210,6 @@ def is_clearly_mismatched(job: dict[str, Any]) -> bool:
     return _is_management_title(normalize_text(job.get("title", "")))
 
 
-class IScoringDimension(ABC):
-    """Abstract strategy interface for calculating an individual job score dimension."""
-
-    @abstractmethod
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float: ...
-
-
-class TitleMatchDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        title = job.get("title", "")
-        return float(title_match_score(title, profile=profile))
-
-
-class ExperienceMatchDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        description = job.get("description", "")
-        years = _profile_get(profile, "experience_years", 0) or 0
-        return float(experience_match_score(description, candidate_years=int(years)))
-
-
-class EducationMatchDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        description = job.get("description", "")
-        return float(education_match_score(description))
-
-
 @lru_cache(maxsize=16)
 def _cached_inventory(keywords: tuple[str, ...], resume_skills: tuple[str, ...]) -> frozenset[str]:
     matcher = get_matcher(keywords)
@@ -253,102 +226,89 @@ def _inventory_for(
     return _cached_inventory(keywords, resume_skills), keywords
 
 
-class SkillMatchDimension(IScoringDimension):
-    """Scores how much of what the posting asks for the candidate actually has."""
-
-    def details(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]):
-        inventory, keywords = _inventory_for(profile)
-        matcher = get_matcher(keywords)
-        requirements = analyze_posting(job.get("title", ""), job.get("description", ""), matcher)
-        match = compare_requirements(requirements, set(inventory))
-        return skill_score_from_match(match), match, requirements, matcher
-
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        return float(self.details(job, profile)[0])
+def _skill_match_details(
+    job: dict[str, Any], profile: UserProfile | dict[str, Any]
+):
+    """Requirement-coverage details for a posting against the candidate's skills."""
+    inventory, keywords = _inventory_for(profile)
+    matcher = get_matcher(keywords)
+    requirements = analyze_posting(job.get("title", ""), job.get("description", ""), matcher)
+    match = compare_requirements(requirements, set(inventory))
+    return skill_score_from_match(match), match, requirements, matcher
 
 
-class SalaryMatchDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        salary_raw = job.get("salary", "Not disclosed")
-        salary_value = parse_salary(salary_raw)
-        return float(parse_salary_score(salary_raw, salary_value))
-
-
-class RemotePreferenceDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        desc = normalize_text(job.get("description", ""))
-        remote_st = normalize_text(job.get("remote_status", ""))
-        return (
-            95.0
-            if (contains_any_term(remote_st, ("remote",)) or contains_any_term(desc, ("remote",)))
-            else 80.0
-        )
-
-
-class MontrealProximityDimension(IScoringDimension):
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        loc = normalize_text(job.get("location", ""))
-        return 95.0 if contains_any_term(loc, ["montreal", "quebec", "qc"]) else 75.0
-
-
-class CommutePreferenceDimension(IScoringDimension):
-    FAR_COMMUTE_TERMS = (
-        "longueuil",
-        "south shore",
-        "north shore",
-        "laval",
-        "west island",
-        "40 min",
-        "45 min",
-        "50 min",
-        "60 min",
-        "commute 40",
-        "commute 45",
-        "commute 50",
-        "commute 60",
-    )
-    TRANSIT_TERMS = (
-        "metro",
-        "subway",
-        "station",
-        "downtown",
-        "plateau",
-        "verdun",
-        "rosemont",
-        "mont royal",
-        "bonaventure",
-        "public transit",
-        "transit",
-        "near metro",
-        "close to metro",
-        "accessible by metro",
-        "easy commute",
-        "30 min",
-        "25 min",
-        "20 min",
+def _remote_preference_score(job: dict[str, Any]) -> float:
+    desc = normalize_text(job.get("description", ""))
+    remote_st = normalize_text(job.get("remote_status", ""))
+    return (
+        95.0
+        if (contains_any_term(remote_st, ("remote",)) or contains_any_term(desc, ("remote",)))
+        else 80.0
     )
 
-    def evaluate(self, job: dict[str, Any], profile: UserProfile | dict[str, Any]) -> float:
-        loc = normalize_text(job.get("location", ""))
-        desc = normalize_text(job.get("description", ""))
 
-        if contains_any_term(loc, self.FAR_COMMUTE_TERMS) or contains_any_term(
-            desc, self.FAR_COMMUTE_TERMS
-        ):
-            return 72.0
-        if contains_any_term(loc, self.TRANSIT_TERMS) or contains_any_term(
-            desc, self.TRANSIT_TERMS
-        ):
-            return 92.0
-        if contains_any_term(loc, ["montreal", "quebec", "qc"]):
-            return 82.0
-        if contains_any_term(loc, ["remote", "hybrid"]):
-            return 88.0
-        return 70.0
+def _montreal_proximity_score(job: dict[str, Any]) -> float:
+    loc = normalize_text(job.get("location", ""))
+    return 95.0 if contains_any_term(loc, ["montreal", "quebec", "qc"]) else 75.0
+
+
+FAR_COMMUTE_TERMS = (
+    "longueuil",
+    "south shore",
+    "north shore",
+    "laval",
+    "west island",
+    "40 min",
+    "45 min",
+    "50 min",
+    "60 min",
+    "commute 40",
+    "commute 45",
+    "commute 50",
+    "commute 60",
+)
+TRANSIT_TERMS = (
+    "metro",
+    "subway",
+    "station",
+    "downtown",
+    "plateau",
+    "verdun",
+    "rosemont",
+    "mont royal",
+    "bonaventure",
+    "public transit",
+    "transit",
+    "near metro",
+    "close to metro",
+    "accessible by metro",
+    "easy commute",
+    "30 min",
+    "25 min",
+    "20 min",
+)
+
+
+def _commute_preference_score(job: dict[str, Any]) -> float:
+    loc = normalize_text(job.get("location", ""))
+    desc = normalize_text(job.get("description", ""))
+
+    if contains_any_term(loc, FAR_COMMUTE_TERMS) or contains_any_term(desc, FAR_COMMUTE_TERMS):
+        return 72.0
+    if contains_any_term(loc, TRANSIT_TERMS) or contains_any_term(desc, TRANSIT_TERMS):
+        return 92.0
+    if contains_any_term(loc, ["montreal", "quebec", "qc"]):
+        return 82.0
+    if contains_any_term(loc, ["remote", "hybrid"]):
+        return 88.0
+    return 70.0
 
 
 class CompositeScorer:
-    """Composite scoring engine applying dimension strategies, weights, and penalty rules."""
+    """Composite scoring engine applying the dimension functions, weights, and
+    penalty/bonus rules."""
+
+    KNOWN_ESTABLISHED_COMPANIES = KNOWN_ESTABLISHED_COMPANIES
 
     def __init__(
         self,
@@ -360,17 +320,6 @@ class CompositeScorer:
         self.profile = profile or USER_PROFILE
         # Optional preference model (see scoring.feedback.FeedbackModel)
         self.feedback = feedback
-
-        self.title_dim = TitleMatchDimension()
-        self.exp_dim = ExperienceMatchDimension()
-        self.edu_dim = EducationMatchDimension()
-        self.skill_dim = SkillMatchDimension()
-        self.salary_dim = SalaryMatchDimension()
-        self.remote_dim = RemotePreferenceDimension()
-        self.prox_dim = MontrealProximityDimension()
-        self.commute_dim = CommutePreferenceDimension()
-
-    KNOWN_ESTABLISHED_COMPANIES = KNOWN_ESTABLISHED_COMPANIES
 
     def _get_config_val(self, key: str, default: float | None = None) -> float:
         fallback = SCORING_RULES[key] if default is None else default
@@ -484,16 +433,19 @@ class CompositeScorer:
     def score_job(self, job: dict[str, Any] | JobListing) -> dict[str, Any]:
         job_dict = job.to_dict() if isinstance(job, JobListing) else dict(job)
 
-        title_score = self.title_dim.evaluate(job_dict, self.profile)
-        experience_score = self.exp_dim.evaluate(job_dict, self.profile)
-        education_score = self.edu_dim.evaluate(job_dict, self.profile)
-        skill_score, skill_match, requirements, matcher = self.skill_dim.details(
-            job_dict, self.profile
+        profile = self.profile
+        title_score = float(title_match_score(job_dict.get("title", ""), profile=profile))
+        years = _profile_get(profile, "experience_years", 0) or 0
+        experience_score = float(
+            experience_match_score(job_dict.get("description", ""), candidate_years=int(years))
         )
-        salary_score = self.salary_dim.evaluate(job_dict, self.profile)
-        remote_score = self.remote_dim.evaluate(job_dict, self.profile)
-        prox_score = self.prox_dim.evaluate(job_dict, self.profile)
-        commute_score = self.commute_dim.evaluate(job_dict, self.profile)
+        education_score = float(education_match_score(job_dict.get("description", "")))
+        skill_score, skill_match, requirements, matcher = _skill_match_details(job_dict, profile)
+        salary_raw = job_dict.get("salary", "Not disclosed")
+        salary_score = float(parse_salary_score(salary_raw, parse_salary(salary_raw)))
+        remote_score = _remote_preference_score(job_dict)
+        prox_score = _montreal_proximity_score(job_dict)
+        commute_score = _commute_preference_score(job_dict)
 
         weighted_dimensions = (
             (title_score, "title_match_weight"),
@@ -785,8 +737,7 @@ def skill_match_score(
     "scikit-learn" count and "excellent" does not trigger "Excel"). Skills named as
     required or in the title weigh more than nice-to-haves.
     """
-    dimension = SkillMatchDimension()
-    score, _, _, _ = dimension.details(
+    score, _, _, _ = _skill_match_details(
         {"title": title, "description": job_description},
         profile if profile is not None else USER_PROFILE,
     )

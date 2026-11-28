@@ -46,11 +46,11 @@ Defaults keep everything inside the repository. These overrides exist for custom
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `JOBHUNTER_DATA_DIR` | `jobhunter/data` | Database folder. |
+| `JOBHUNTER_DATA_DIR` | `data` (repo root) | Database folder. |
 | `JOBHUNTER_DB_PATH` | `<data dir>/jobhunter.db` | Database file. |
-| `JOBHUNTER_OUTPUT_DIR` | `jobhunter/outputs` | Reports and generated application packs. |
+| `JOBHUNTER_OUTPUT_DIR` | `outputs` (repo root) | Reports and generated application packs. |
 | `JOBHUNTER_RESUME_DIR` | `jobhunter/resume` | Folder with your private `master_resume.txt`, `master_resume_fr.txt`, `summary_variants.json`. |
-| `JOBHUNTER_LOG_DIR` | `jobhunter/logs` | Logs. |
+| `JOBHUNTER_LOG_DIR` | `logs` (repo root) | Logs. |
 | `JOBHUNTER_DASHBOARD_HOST` / `_PORT` / `_HEADLESS` | `127.0.0.1` / `8501` / off | Dashboard binding. Keep the host on loopback unless you add your own access control: the dashboard has no login. |
 
 ## Your resume
